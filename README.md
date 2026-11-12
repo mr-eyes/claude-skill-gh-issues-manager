@@ -179,7 +179,7 @@ lint: all 7 drafts pass
 dry run: no network access, nothing written
 note: commands are listed issue by issue. The real run creates all issues first, then writes the bodies, then posts the comments.
 would run: gh issue create --repo example-org/tinycsv --title 'tinycsv project hub' --body-file - --label hub   # body: a one-line stub, replaced in the next step
-would run: gh issue edit '<number of NEW-hub>' --repo example-org/tinycsv --body-file -   # hub.md, 4034 characters, with NEW-reader, NEW-speed, NEW-task-newlines replaced by real numbers
+would run: gh issue edit '<number of NEW-hub>' --repo example-org/tinycsv --body-file -   # hub.md, 4099 characters, with NEW-reader, NEW-speed, NEW-task-newlines replaced by real numbers
 would read back: gh api repos/example-org/tinycsv/issues/<number of NEW-hub> and compare with hub.md
 would run: gh issue pin '<number of NEW-hub>' --repo example-org/tinycsv
 ...
