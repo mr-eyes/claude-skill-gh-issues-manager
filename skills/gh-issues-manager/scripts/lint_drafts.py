@@ -36,6 +36,15 @@ FINAL_RECORD_SECTIONS = [
     "## Related topics",
 ]
 
+RESUME_FIELDS = [
+    "**Last updated:**",
+    "**Current focus:**",
+    "**Active issues:**",
+    "**Last decisions:**",
+    "**Next actions:**",
+    "**Holds:**",
+]
+
 KINDS = {
     "hub": {
         "sections": [
@@ -108,19 +117,11 @@ KINDS = {
             "**Also updated:**",
         ],
     },
+    "resume": {"header": "Resume block", "sections": RESUME_FIELDS},
     "continuation": {"sections": []},
     "pointer": {"sections": []},
     "generic": {"sections": []},
 }
-
-RESUME_FIELDS = [
-    "**Last updated:**",
-    "**Current focus:**",
-    "**Active issues:**",
-    "**Last decisions:**",
-    "**Next actions:**",
-    "**Holds:**",
-]
 
 # Date, time and zone, for example "2026-03-04 14:10 PST" or "2026-03-04 14:10 UTC+1".
 STAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:[A-Z]{2,5}|UTC[+-]\d{1,2}(?::\d{2})?)\b"
@@ -389,17 +390,19 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
     check_sections(text, kind, template, add)
 
     if kind == "hub":
-        if text.count(ghim.RESUME_START) != 1 or text.count(ghim.RESUME_END) != 1:
-            add("error", "resume-markers", 0,
-                "a hub needs exactly one '%s' and one '%s'" % (ghim.RESUME_START, ghim.RESUME_END))
-        else:
-            block = ghim.extract_resume_block(text)
-            if block is None:
-                add("error", "resume-markers", 0, "resume markers are in the wrong order")
-            else:
-                findings.extend(lint_resume_block(block, template))
+        if ghim.RESUME_START in text or ghim.RESUME_END in text:
+            add("error", "resume-in-hub", 0,
+                "the resume block is a comment on the hub, not part of its body; remove the markers")
         if not mermaid_blocks:
             add("warning", "hub-map", 0, "the hub has no Mermaid map")
+
+    if kind == "resume":
+        if text.count(ghim.RESUME_START) != 1 or text.count(ghim.RESUME_END) != 1 \
+                or ghim.extract_resume_block(text) is None:
+            add("error", "resume-markers", 0,
+                "a resume comment needs exactly one '%s' followed by one '%s'" % (ghim.RESUME_START, ghim.RESUME_END))
+        else:
+            findings.extend(lint_resume_block(ghim.extract_resume_block(text), template))
 
     if kind == "decision" and not template:
         has_quote = any(l.lstrip().startswith(">") and l.lstrip(" >").strip()
@@ -425,7 +428,7 @@ def lint_resume_block(block, template=False):
                                 "resume block is %d characters; keep it under %d" % (len(block), ghim.RESUME_LIMIT)))
     for field in RESUME_FIELDS:
         if field not in block:
-            findings.append(Finding("error", "resume-field", 0, "resume block lacks '%s'" % field))
+            findings.append(Finding("error", "resume-field", 0, "resume block lacks '%s' between the markers" % field))
     if not template:
         match = re.search(r"\*\*Last updated:\*\*\s*(.*)", block)
         if match and not re.match(STAMP, match.group(1).strip()):

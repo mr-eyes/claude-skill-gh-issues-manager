@@ -13,8 +13,9 @@ import sys
 
 CONFIG_NAME = ".gh-issues-manager.json"
 BODY_LIMIT = 65536
-RESUME_START = "<!-- resume:start -->"
-RESUME_END = "<!-- resume:end -->"
+RESUME_START = "<!-- ghim:resume:start -->"
+RESUME_END = "<!-- ghim:resume:end -->"
+RESUME_HEADING = "### Resume block: "
 RESUME_LIMIT = 4000
 PLACEHOLDER_RE = re.compile(r"\bNEW-([a-z0-9]+(?:-[a-z0-9]+)*)")
 
@@ -143,37 +144,40 @@ def allowed_users(repo, trusted=None):
     return {repo.split("/")[0].lower()} | trusted[repo.lower()]
 
 
-EDITS_CHECKED = 100
+COMMENTS_READ = 50
+EDITS_READ = 100
 
-HUB_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
+RESUME_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      body
-      author { login }
-      editor { login }
-      lastEditedAt
-      head: userContentEdits(first: 100) { totalCount nodes { editedAt editor { login } } }
-      tail: userContentEdits(last: 100) { nodes { editedAt editor { login } } }
+      comments(last: 50) {
+        totalCount
+        nodes {
+          id
+          url
+          createdAt
+          body
+          author { login }
+          editor { login }
+          lastEditedAt
+          userContentEdits(first: 100) { totalCount nodes { editedAt editor { login } } }
+        }
+      }
     }
   }
 }"""
 
 
-def read_hub_with_editors(repo, number, timeout=60):
-    """One call that returns the hub body together with who wrote and edited it.
+def read_hub_comments(repo, number, timeout=60):
+    """The newest COMMENTS_READ comments of the hub, newest first by creation time.
 
-    Returns (body, author, editors, problem).
-    - author: login, or None for a deleted account.
-    - editors: logins of the account named as the issue's current editor and of
-      the newest EDITS_CHECKED body edits. None stands for an unknown account.
-      Both ends of the edit list are fetched and the newest entries are chosen
-      by their editedAt time, so the result does not depend on the order in
-      which the API lists edits.
-    - problem: None, or the reason the edit history could not be trusted
-      (the issue was edited but no edit, or not the newest one, was returned).
+    One GraphQL call returns each comment's text together with who wrote it and
+    its edit history, so what is shown is what was checked. Each item is a dict
+    with url, created, body, author, last_edited, editor, edit_total and
+    edit_editors (a list of logins; None stands for an unknown account).
     """
     owner, name = repo.split("/")
-    raw = gh(["api", "graphql", "-f", "query=" + HUB_QUERY, "-f", "owner=" + owner,
+    raw = gh(["api", "graphql", "-f", "query=" + RESUME_QUERY, "-f", "owner=" + owner,
               "-f", "name=" + name, "-F", "number=%d" % number], timeout=timeout)
     issue = (((json.loads(raw).get("data") or {}).get("repository") or {}).get("issue"))
     if not issue:
@@ -182,22 +186,66 @@ def read_hub_with_editors(repo, number, timeout=60):
     def login(node):
         return (node or {}).get("login")
 
-    edits = {}
-    for end in ("head", "tail"):
-        for node in ((issue.get(end) or {}).get("nodes") or []):
-            if node and node.get("editedAt"):
-                edits.setdefault((node["editedAt"], login(node.get("editor"))), None)
-    newest = sorted(edits, reverse=True)[:EDITS_CHECKED]
-    editors = {who for _, who in newest}
-    last_edited = issue.get("lastEditedAt")
-    problem = None
-    if last_edited:
-        editors.add(login(issue.get("editor")))
-        if not newest:
-            problem = "the issue was edited but its edit history came back empty"
-        elif newest[0][0] < last_edited:
-            problem = "the newest edit was not in the returned edit history"
-    return issue.get("body") or "", login(issue.get("author")), editors, problem
+    comments = []
+    for node in ((issue.get("comments") or {}).get("nodes") or []):
+        if not node:
+            continue
+        edits = node.get("userContentEdits") or {}
+        comments.append({
+            "url": str(node.get("url") or ""),
+            "created": str(node.get("createdAt") or ""),
+            "body": node.get("body") or "",
+            "author": login(node.get("author")),
+            "last_edited": node.get("lastEditedAt"),
+            "editor": login(node.get("editor")),
+            "edit_total": edits.get("totalCount") or 0,
+            "edit_editors": [login(e.get("editor")) for e in (edits.get("nodes") or []) if e],
+        })
+    comments.sort(key=lambda c: c["created"], reverse=True)
+    return comments
+
+
+def resume_comment_problem(comment, allowed):
+    """Why a comment that carries the resume markers may not be shown, or None.
+
+    Fail closed: the author, the current editor and every editor in the edit
+    history must be allowed, and the history must be complete.
+    """
+    def ok(name):
+        return bool(name) and name.lower() in allowed
+
+    if extract_resume_block(comment["body"]) is None:
+        return "malformed markers"
+    if not ok(comment["author"]):
+        return "written by a non-allowed account"
+    edited = bool(comment["last_edited"]) or comment["edit_total"] > 0 or bool(comment["edit_editors"])
+    if edited:
+        if comment["last_edited"] and not ok(comment["editor"]):
+            return "edited by a non-allowed account"
+        if not comment["edit_editors"] or comment["edit_total"] > len(comment["edit_editors"]):
+            return "edited, with an edit history that could not be read in full"
+        if not all(ok(name) for name in comment["edit_editors"]):
+            return "edited by a non-allowed account"
+    return None
+
+
+def pick_resume_comment(comments, allowed, any_author=False):
+    """Choose the newest usable resume comment.
+
+    Returns (comment or None, {reason: count of newer marker comments ignored}).
+    `comments` must be newest first.
+    """
+    ignored = {}
+    for comment in comments:
+        if RESUME_START not in comment["body"]:
+            continue
+        problem = resume_comment_problem(comment, allowed)
+        if any_author and problem != "malformed markers":
+            problem = None
+        if problem is None:
+            return comment, ignored
+        ignored[problem] = ignored.get(problem, 0) + 1
+    return None, ignored
 
 
 def describe(config, repo):
