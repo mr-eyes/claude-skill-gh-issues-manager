@@ -59,6 +59,7 @@ def main(argv=None):
 
     config = ghim.load_config()
     repo = ghim.resolve_repo(args.repo, config)
+    print(ghim.describe(config, repo))
     if not os.path.isfile(args.body_file):
         sys.exit("error: not a file: %s" % args.body_file)
     draft = ghim.read_text(args.body_file)

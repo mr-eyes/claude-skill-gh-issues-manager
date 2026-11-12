@@ -68,20 +68,24 @@ def main(argv=None):
     parser.add_argument("--repo", help="owner/name (default: from .gh-issues-manager.json)")
     parser.add_argument("--out", required=True, help="folder for the snapshot")
     parser.add_argument("--dry-run", action="store_true", help="print the gh calls and the target folder; fetch and write nothing")
+    parser.add_argument("--timeout", type=int, default=1800,
+                        help="seconds allowed for each of the two listing calls (default 1800; a tracker with "
+                             "thousands of comments needs minutes)")
     args = parser.parse_args(argv)
 
     config = ghim.load_config()
     repo = ghim.resolve_repo(args.repo, config)
     issue_call = ["api", "--paginate", "repos/%s/issues?state=all&per_page=100" % repo]
     comment_call = ["api", "--paginate", "repos/%s/issues/comments?per_page=100" % repo]
+    print(ghim.describe(config, repo))
     if args.dry_run:
         print("would run: " + ghim.show_command(issue_call, "read-only"))
         print("would run: " + ghim.show_command(comment_call, "read-only"))
         print("would write: %s/INDEX.md and %s/issues/<number>.md" % (args.out, args.out))
         return 0
 
-    issues = ghim.parse_json_stream(ghim.gh(issue_call, timeout=240))
-    comments = ghim.parse_json_stream(ghim.gh(comment_call, timeout=240))
+    issues = ghim.parse_json_stream(ghim.gh(issue_call, timeout=args.timeout))
+    comments = ghim.parse_json_stream(ghim.gh(comment_call, timeout=args.timeout))
     by_issue = {}
     for comment in comments:
         match = re.search(r"/issues/(\d+)$", comment.get("issue_url", ""))

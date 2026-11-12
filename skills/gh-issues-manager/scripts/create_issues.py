@@ -8,7 +8,15 @@ from the API to confirm it matches the draft.
 
 Only files named in the manifest are posted. Nothing is ever deleted. Progress
 is kept in <manifest>.state.json, so a rerun continues where a failed run
-stopped and never creates an issue twice.
+stopped:
+- before each creation a pending entry is written; if the run dies before the
+  result is saved, the rerun first looks on GitHub for the item it may already
+  have created (same author, same title or body) and adopts it;
+- a body is edited only while it still is what this script wrote (the stub or
+  the last text it posted); a body changed by anyone else is left alone;
+- a comment is identified by its target and its draft file, not by its
+  position, so the manifest can grow;
+- a missing pin is retried on every run.
 
 Manifest (JSON):
   {"repo": "owner/name",
@@ -84,6 +92,28 @@ def final_lint(text, item, repo, numbers, config, checked):
     return lint_drafts.report(item["_path"], findings, quiet=True)
 
 
+def find_created_issue(repo, title, bodies):
+    """Look for an issue this account already created with this title and one of these bodies."""
+    rows = json.loads(ghim.gh(["issue", "list", "--repo", repo, "--author", "@me", "--state", "all",
+                               "--json", "number,title,body,url", "--limit", "200"]))
+    wanted = {ghim.normalize(body) for body in bodies}
+    return [row for row in rows if row.get("title") == title and ghim.normalize(row.get("body") or "") in wanted]
+
+
+def find_posted_comment(repo, number, body):
+    """Look for a comment by this account on the issue with exactly this body."""
+    me = ghim.gh(["api", "user", "--jq", ".login"]).strip()
+    rows = ghim.parse_json_stream(ghim.gh(
+        ["api", "--paginate", "repos/%s/issues/%d/comments?per_page=100" % (repo, number)]))
+    return [row for row in rows if (row.get("user") or {}).get("login") == me
+            and ghim.normalize(row.get("body") or "") == ghim.normalize(body)]
+
+
+def is_pinned(repo, number):
+    return bool(json.loads(ghim.gh(["issue", "view", str(number), "--repo", repo, "--json", "isPinned"]))
+                .get("isPinned"))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--manifest", required=True, help="JSON manifest listing the drafts to post")
@@ -97,6 +127,7 @@ def main(argv=None):
     manifest.setdefault("issues", [])
     manifest.setdefault("comments", [])
     repo = ghim.resolve_repo(args.repo or manifest.get("repo"), config)
+    print(ghim.describe(config, repo))
     state_path = args.manifest + ".state.json"
     state = {"repo": repo, "issues": {}, "comments": {}}
     if os.path.isfile(state_path):
@@ -123,79 +154,128 @@ def main(argv=None):
         print("run setup_labels.py first")
         return 1
 
-    numbers = {key: entry["number"] for key, entry in state["issues"].items()}
     failures, checked = 0, {}
 
     # 1. Create every issue that does not exist yet.
     for item in manifest["issues"]:
         key = item["key"]
-        if key in numbers:
-            print("exists: NEW-%s is #%d" % (key, numbers[key]))
+        entry = state["issues"].get(key) or {}
+        if entry.get("number"):
+            print("exists: NEW-%s is #%d" % (key, entry["number"]))
             continue
         draft = ghim.read_text(item["_path"])
         direct = not ghim.PLACEHOLDER_RE.search(draft)
+        first_body = draft if direct else STUB
+        if entry.get("pending"):
+            found = find_created_issue(repo, item["title"], [STUB, draft])
+            if len(found) > 1:
+                print("stopped: an earlier run may have created NEW-%s, and %d issues by this account match its "
+                      "title and text (%s). Put the right number into %s as issues.%s.number and rerun."
+                      % (key, len(found), ", ".join("#%d" % row["number"] for row in found), state_path, key))
+                return 1
+            if found:
+                state["issues"][key] = {"number": found[0]["number"], "url": found[0]["url"],
+                                        "written": digest(found[0].get("body") or ""), "verified": None}
+                save_state(state_path, state)
+                print("adopted: NEW-%s is #%d, created by an earlier run that did not finish"
+                      % (key, found[0]["number"]))
+                continue
+        state["issues"][key] = {"pending": True}
+        save_state(state_path, state)
         command = ["issue", "create", "--repo", repo, "--title", item["title"], "--body-file", "-"]
         for label in item["labels"]:
             command += ["--label", label]
-        url = ghim.gh(command, stdin=draft if direct else STUB).strip().split("\n")[-1]
-        numbers[key] = number_from_url(url)
-        state["issues"][key] = {"number": numbers[key], "url": url, "verified": None}
+        url = ghim.gh(command, stdin=first_body).strip().split("\n")[-1]
+        number = number_from_url(url)
+        state["issues"][key] = {"number": number, "url": url, "written": digest(first_body), "verified": None}
         save_state(state_path, state)
-        print("created: NEW-%s is #%d  %s" % (key, numbers[key], url))
+        print("created: NEW-%s is #%d  %s" % (key, number, url))
 
-    # 2. Write the final bodies and read them back.
+    numbers = {key: entry["number"] for key, entry in state["issues"].items() if entry.get("number")}
+
+    # 2. Write the final bodies, read them back, pin.
     for item in manifest["issues"]:
         key, number = item["key"], numbers[item["key"]]
+        entry = state["issues"][key]
         item["_home"] = repo
         body = ghim.substitute_placeholders(ghim.read_text(item["_path"]), numbers, repo, repo)
-        if state["issues"][key].get("verified") == digest(body):
+        if entry.get("verified") == digest(body):
             print("already verified: #%d (%s)" % (number, key))
-            continue
-        if final_lint(body, item, repo, numbers, config, checked):
+        elif final_lint(body, item, repo, numbers, config, checked):
             print("not written: #%d (%s) fails lint after substitution" % (number, key))
             failures += 1
-            continue
-        if ghim.normalize(ghim.read_issue_body(repo, number)) != ghim.normalize(body):
-            ghim.gh(["issue", "edit", str(number), "--repo", repo, "--body-file", "-"], stdin=body)
-        if ghim.verify_body(body, ghim.read_issue_body(repo, number), "#%d (%s)" % (number, key)):
-            state["issues"][key]["verified"] = digest(body)
-            save_state(state_path, state)
         else:
-            failures += 1
-        if item.get("pin") and not state["issues"][key].get("pinned"):
-            ghim.gh(["issue", "pin", str(number), "--repo", repo])
-            state["issues"][key]["pinned"] = True
+            current = ghim.read_issue_body(repo, number)
+            if digest(current) != digest(body):
+                if digest(current) not in (digest(STUB), entry.get("written")):
+                    print("not written: #%d (%s) was changed on GitHub since this script wrote it, so it is left "
+                          "alone. To replace it on purpose, with a diff and a backup, use post_verified.py body."
+                          % (number, key))
+                    failures += 1
+                    current = None
+                else:
+                    ghim.gh(["issue", "edit", str(number), "--repo", repo, "--body-file", "-"], stdin=body)
+                    entry["written"] = digest(body)
+                    save_state(state_path, state)
+            if current is not None:
+                if ghim.verify_body(body, ghim.read_issue_body(repo, number), "#%d (%s)" % (number, key)):
+                    entry["written"] = entry["verified"] = digest(body)
+                    save_state(state_path, state)
+                else:
+                    failures += 1
+        if item.get("pin"):
+            try:
+                if not is_pinned(repo, number):
+                    ghim.gh(["issue", "pin", str(number), "--repo", repo])
+                pinned = is_pinned(repo, number)
+            except ghim.GhError as error:
+                print("pin failed: %s" % error)
+                pinned = False
+            entry["pinned"] = pinned
             save_state(state_path, state)
-            print("pinned: #%d" % number)
+            if pinned:
+                print("pinned: #%d" % number)
+            else:
+                print("NOT PINNED: #%d (%s); rerun to try again" % (number, key))
+                failures += 1
 
-    # 3. Post the comments, in manifest order.
+    # 3. Post the comments. Each is known by its target and draft file.
     for index, item in enumerate(manifest["comments"]):
         target_repo = item.get("repo", repo)
         item["_home"] = repo
         target = item["issue"]
         number = target if isinstance(target, int) else numbers[ghim.PLACEHOLDER_RE.fullmatch(target).group(1)]
+        label = "comment %s on %s#%d" % (item["body_file"], target_repo, number)
         body = ghim.substitute_placeholders(ghim.read_text(item["_path"]), numbers, target_repo, repo)
-        slot = "%d:%s" % (index, item["body_file"])
-        done = state["comments"].get(slot)
-        if done and done.get("verified") == digest(body):
-            print("already posted: comment %d on %s#%d" % (index + 1, target_repo, number))
+        slot = "%s#%d:%s" % (target_repo, number, item["body_file"])
+        entry = state["comments"].get(slot) or {}
+        if entry.get("url") and entry.get("verified") == digest(body):
+            print("already posted: %s" % label)
             continue
-        if done:
-            print("not posted: comment %d was posted before with different text (%s). "
-                  "Post a correction comment instead of changing it." % (index + 1, done.get("url")))
+        if entry.get("url") and entry.get("written") not in (None, digest(body)):
+            print("not posted: %s was posted before with different text (%s). "
+                  "Post a correction comment instead of changing it." % (label, entry["url"]))
             failures += 1
             continue
-        if final_lint(body, item, target_repo, numbers if target_repo == repo else {}, config, checked):
-            print("not posted: comment %d fails lint after substitution" % (index + 1))
-            failures += 1
-            continue
-        url = ghim.gh(["issue", "comment", str(number), "--repo", target_repo, "--body-file", "-"],
-                      stdin=body).strip().split("\n")[-1]
-        entry = {"url": url, "verified": None}
-        state["comments"][slot] = entry
-        save_state(state_path, state)
-        returned = ghim.read_comment_body(target_repo, comment_id_from_url(url))
-        if ghim.verify_body(body, returned, "comment %d on %s#%d" % (index + 1, target_repo, number)):
+        if not entry.get("url"):
+            if final_lint(body, item, target_repo, numbers if target_repo == repo else {}, config, checked):
+                print("not posted: %s fails lint after substitution" % label)
+                failures += 1
+                continue
+            found = find_posted_comment(target_repo, number, body) if entry.get("pending") else []
+            if found:
+                entry = {"url": found[0]["html_url"], "written": digest(body), "verified": None}
+                print("adopted: %s, posted by an earlier run that did not finish" % label)
+            else:
+                state["comments"][slot] = {"pending": True}
+                save_state(state_path, state)
+                url = ghim.gh(["issue", "comment", str(number), "--repo", target_repo, "--body-file", "-"],
+                              stdin=body).strip().split("\n")[-1]
+                entry = {"url": url, "written": digest(body), "verified": None}
+            state["comments"][slot] = entry
+            save_state(state_path, state)
+        returned = ghim.read_comment_body(target_repo, comment_id_from_url(entry["url"]))
+        if ghim.verify_body(body, returned, label):
             entry["verified"] = digest(body)
             save_state(state_path, state)
         else:
@@ -215,7 +295,9 @@ def main(argv=None):
 
 def dry_run(manifest, repo, state):
     print("dry run: no network access, nothing written")
-    known = {key: entry["number"] for key, entry in state.get("issues", {}).items()}
+    print("note: commands are listed issue by issue. The real run creates all issues first, then writes "
+          "the bodies, then posts the comments.")
+    known = {key: entry["number"] for key, entry in state.get("issues", {}).items() if entry.get("number")}
     for item in manifest["issues"]:
         key = item["key"]
         draft = ghim.read_text(item["_path"])
@@ -244,7 +326,7 @@ def dry_run(manifest, repo, state):
         target_repo = item.get("repo", repo)
         print("would run: " + ghim.show_command(
             ["issue", "comment", shown, "--repo", target_repo, "--body-file", "-"],
-            "comment %d: %s, %d characters" % (index + 1, item["body_file"], len(ghim.read_text(item["_path"])))))
+            "%s, %d characters" % (item["body_file"], len(ghim.read_text(item["_path"])))))
         print("would read back: gh api repos/%s/issues/comments/<id> and compare with %s"
               % (target_repo, item["body_file"]))
     return 0

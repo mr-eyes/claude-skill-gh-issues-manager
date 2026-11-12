@@ -119,6 +119,7 @@ RESUME_FIELDS = [
     "**Active issues:**",
     "**Last decisions:**",
     "**Next actions:**",
+    "**Holds:**",
 ]
 
 # Date, time and zone, for example "2026-03-04 14:10 PST" or "2026-03-04 14:10 UTC+1".
@@ -364,6 +365,8 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
 
         if region == "prose":
             for match in BARE_REF.finditer(strip_inline_code(line)):
+                if len(match.group(1)) == 6:
+                    continue  # six digits after # is read as a hex color such as #123456, not as an issue
                 bare.setdefault(int(match.group(1)), number)
 
     for block in mermaid_blocks:
@@ -461,6 +464,14 @@ def load_manifest(path):
                 problems.append("comment %d targets %r, which is not NEW-<key> of this manifest" % (index + 1, target))
         elif not isinstance(target, int):
             problems.append("comment %d: 'issue' must be a number or NEW-<key>" % (index + 1))
+    for item in issues:
+        for label in item.get("labels") or []:
+            if "," in str(label):
+                problems.append("label %r of issue %r contains a comma; gh would split it into two labels"
+                                % (label, item.get("key")))
+    files = [item.get("body_file") for item in issues + comments if item.get("body_file")]
+    for name in sorted({f for f in files if files.count(f) > 1}):
+        problems.append("body file %s is listed more than once; every draft is posted exactly once" % name)
     for item in issues + comments:
         name = item.get("body_file")
         if name:

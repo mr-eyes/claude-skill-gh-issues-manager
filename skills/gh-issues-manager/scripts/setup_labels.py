@@ -45,6 +45,8 @@ def wanted_labels(profiles, topics):
             seen.add(name)
             labels.append({"name": name, "color": TOPIC_COLOR, "description": "Topic: " + name[6:]})
     for label in labels:
+        if "," in label["name"]:
+            sys.exit("error: label name contains a comma, which gh reads as a separator: %s" % label["name"])
         if len(label["name"]) > 50:
             sys.exit("error: label name over 50 characters: %s" % label["name"])
         if len(label.get("description", "")) > 100:
@@ -77,6 +79,7 @@ def main(argv=None):
             ["label", "list", "--repo", repo, "--json", "name,color,description", "--limit", "1000"]))
     existing = None if existing_list is None else {l["name"].lower(): l for l in existing_list}
 
+    print(ghim.describe(config, repo))
     print("repository: %s   profiles: core%s   labels wanted: %d"
           % (repo, "".join(", " + p for p in profiles if p != "core"), len(labels)))
     if existing is None:
