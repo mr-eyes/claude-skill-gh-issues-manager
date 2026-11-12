@@ -1,0 +1,11 @@
+{
+  "name": "gh-issues-manager",
+  "version": "0.1.0",
+  "description": "Keep a project's full record in GitHub issues: a pinned hub, one self-contained issue per topic, dated comments for results, decisions and failures, and a resume block that survives context compaction.",
+  "author": {
+    "name": "mr-eyes",
+    "url": "https://github.com/mr-eyes"
+  },
+  "repository": "https://github.com/mr-eyes/claude-skill-gh-issues-manager",
+  "keywords": ["github", "issues", "project-management", "research", "manuscript"]
+}

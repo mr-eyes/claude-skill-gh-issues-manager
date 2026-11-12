@@ -1,0 +1,17 @@
+{
+  "description": "Print the project hub's resume block into context at session start, on resume and after compaction. Silent unless the project has a .gh-issues-manager.json file.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/session_start_hook.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
