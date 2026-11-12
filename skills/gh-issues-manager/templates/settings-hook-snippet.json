@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/skills/gh-issues-manager/scripts/session_start_hook.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

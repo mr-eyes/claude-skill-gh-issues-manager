@@ -1,0 +1,10 @@
+{
+  "repo": "owner/name",
+  "issues": [
+    {"key": "hub", "kind": "hub", "title": "Project hub", "labels": ["hub"], "body_file": "hub.md", "pin": true},
+    {"key": "parser", "kind": "final-record", "title": "Parser", "labels": ["final-record", "topic:parser"], "body_file": "topic-parser.md"}
+  ],
+  "comments": [
+    {"issue": "NEW-parser", "kind": "result", "body_file": "result-parser-1.md"}
+  ]
+}
