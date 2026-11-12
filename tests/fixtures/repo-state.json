@@ -1,0 +1,19 @@
+{
+  "labels": [
+    {"name": "bug", "color": "d73a4a", "description": "Something isn't working"},
+    {"name": "hub", "color": "5319e7", "description": "The pinned entry point of the project record"},
+    {"name": "active", "color": "ffffff", "description": "old description"}
+  ],
+  "issues": {
+    "1": {"title": "Old question about tolerance", "body": "First issue, see #2.", "labels": ["bug"], "state": "closed"},
+    "2": {"title": "Add tolerance option", "body": "Adds `--tol`.", "labels": [], "pull_request": true, "state": "closed"},
+    "3": {"title": "Benchmark the reader", "body": "Task body.", "labels": ["active"], "state": "open"}
+  },
+  "comments": {
+    "9001": {"issue": 1, "body": "A reply with a pipe | in it.", "created_at": "2026-01-07T09:15:00Z"},
+    "9002": {"issue": 1, "body": "Second reply.", "created_at": "2026-01-08T10:00:00Z"},
+    "9003": {"issue": 3, "body": "Started.", "created_at": "2026-01-09T11:00:00Z"}
+  },
+  "next_issue": 4,
+  "next_comment": 9100
+}

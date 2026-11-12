@@ -1,0 +1,13 @@
+{
+  "repo": "example-org/tinycsv",
+  "issues": [
+    {"key": "hub", "kind": "hub", "title": "tinycsv project hub", "labels": ["hub"], "body_file": "hub.md", "pin": true},
+    {"key": "reader", "kind": "final-record", "title": "Reader: quoting and line endings", "labels": ["final-record", "rel:fixed", "topic:reader"], "body_file": "topic-reader.md"},
+    {"key": "speed", "kind": "final-record", "title": "Read speed against the standard library", "labels": ["final-record", "rd:results", "topic:speed"], "body_file": "topic-speed.md"},
+    {"key": "task-newlines", "kind": "active", "title": "Task: support newlines inside quoted fields", "labels": ["active", "topic:reader"], "body_file": "task-newlines.md"}
+  ],
+  "comments": [
+    {"issue": "NEW-speed", "kind": "result", "body_file": "result-speed-1.md"},
+    {"issue": "NEW-reader", "kind": "decision", "body_file": "decision-reader-1.md"}
+  ]
+}

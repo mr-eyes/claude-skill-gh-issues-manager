@@ -1,0 +1,9 @@
+{
+  "repo": "example-org/tinycsv",
+  "hub": 1,
+  "timezone": "US Pacific time, written as 2026-03-04 14:10 PST",
+  "profiles": ["software", "research"],
+  "topics": ["reader", "speed"],
+  "restricted_patterns": [],
+  "banned_words": []
+}
