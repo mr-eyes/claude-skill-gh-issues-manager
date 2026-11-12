@@ -1,0 +1,38 @@
+{
+  "name": "research",
+  "deliverable": "A report or internal write-up of what was learned.",
+  "events": [
+    "finished experiment or analysis",
+    "decision on direction or method",
+    "failed or abandoned approach",
+    "new data or resource version",
+    "merged change to analysis code"
+  ],
+  "labels": [
+    {
+      "name": "rd:question",
+      "color": "1d76db",
+      "description": "Feeds the report: question and background"
+    },
+    {
+      "name": "rd:methods",
+      "color": "1d76db",
+      "description": "Feeds the report: methods and settings"
+    },
+    {
+      "name": "rd:results",
+      "color": "1d76db",
+      "description": "Feeds the report: results"
+    },
+    {
+      "name": "rd:limitations",
+      "color": "1d76db",
+      "description": "Feeds the report: limits and negative results"
+    },
+    {
+      "name": "rd:next",
+      "color": "1d76db",
+      "description": "Feeds the report: recommended next work"
+    }
+  ]
+}

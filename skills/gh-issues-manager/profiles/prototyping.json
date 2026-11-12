@@ -1,0 +1,37 @@
+{
+  "name": "prototyping",
+  "deliverable": "A go or no-go recommendation with the evidence behind it.",
+  "events": [
+    "prototype run with its measurements",
+    "go, no-go or pivot decision",
+    "failed attempt and its cause",
+    "change of test data or acceptance criterion"
+  ],
+  "labels": [
+    {
+      "name": "proto:hypothesis",
+      "color": "1d76db",
+      "description": "Feeds the recommendation: what the prototype tests"
+    },
+    {
+      "name": "proto:setup",
+      "color": "1d76db",
+      "description": "Feeds the recommendation: setup and settings"
+    },
+    {
+      "name": "proto:results",
+      "color": "1d76db",
+      "description": "Feeds the recommendation: measurements"
+    },
+    {
+      "name": "proto:limitations",
+      "color": "1d76db",
+      "description": "Feeds the recommendation: limits and untested cases"
+    },
+    {
+      "name": "proto:go-no-go",
+      "color": "1d76db",
+      "description": "Feeds the recommendation itself"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "core",
+  "deliverable": "Labels every project gets, whatever its type.",
+  "events": [],
+  "labels": [
+    {
+      "name": "hub",
+      "color": "5319e7",
+      "description": "The pinned entry point of the project record"
+    },
+    {
+      "name": "final-record",
+      "color": "5319e7",
+      "description": "Self-contained record of one topic"
+    },
+    {
+      "name": "active",
+      "color": "5319e7",
+      "description": "Bounded task in progress; names its destination topic"
+    },
+    {
+      "name": "needs-decision",
+      "color": "d93f0b",
+      "description": "Waiting for a decision from the owner"
+    },
+    {
+      "name": "migrated",
+      "color": "c5def5",
+      "description": "Content copied from an older tracker"
+    }
+  ]
+}

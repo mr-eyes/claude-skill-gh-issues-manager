@@ -1,0 +1,38 @@
+{
+  "name": "manuscript",
+  "deliverable": "A paper: main text, figures, tables and supplement.",
+  "events": [
+    "result that enters a figure, table or sentence",
+    "decision on a claim, analysis or wording",
+    "reviewer or co-author comment and its response",
+    "frozen data or code version",
+    "submission, revision or resubmission"
+  ],
+  "labels": [
+    {
+      "name": "ms:background",
+      "color": "1d76db",
+      "description": "Feeds the manuscript: introduction and background"
+    },
+    {
+      "name": "ms:methods",
+      "color": "1d76db",
+      "description": "Feeds the manuscript: methods"
+    },
+    {
+      "name": "ms:results",
+      "color": "1d76db",
+      "description": "Feeds the manuscript: results, figures and tables"
+    },
+    {
+      "name": "ms:limitations",
+      "color": "1d76db",
+      "description": "Feeds the manuscript: limitations and discussion"
+    },
+    {
+      "name": "ms:supplement",
+      "color": "1d76db",
+      "description": "Feeds the manuscript: supplement"
+    }
+  ]
+}

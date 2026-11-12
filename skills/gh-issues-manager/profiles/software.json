@@ -1,0 +1,39 @@
+{
+  "name": "software",
+  "deliverable": "A release: the changelog, the documentation and the known issues.",
+  "events": [
+    "merged pull request",
+    "release or tag",
+    "design decision",
+    "benchmark or test campaign",
+    "incident or regression",
+    "dependency or interface change"
+  ],
+  "labels": [
+    {
+      "name": "rel:added",
+      "color": "1d76db",
+      "description": "Feeds the release notes: new behavior"
+    },
+    {
+      "name": "rel:changed",
+      "color": "1d76db",
+      "description": "Feeds the release notes: changed or removed behavior"
+    },
+    {
+      "name": "rel:fixed",
+      "color": "1d76db",
+      "description": "Feeds the release notes: fixes"
+    },
+    {
+      "name": "rel:docs",
+      "color": "1d76db",
+      "description": "Feeds the documentation"
+    },
+    {
+      "name": "rel:known-issues",
+      "color": "1d76db",
+      "description": "Feeds the known issues and limits"
+    }
+  ]
+}
