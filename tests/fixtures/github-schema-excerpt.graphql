@@ -1,0 +1,34 @@
+# Excerpt of the public GitHub GraphQL schema, taken 2026-11-11 from
+# https://docs.github.com/public/fpt/schema.docs.graphql
+# Only the fields the scripts query are kept. Field signatures are copied unchanged,
+# with descriptions removed. The tests check every queried field against this file.
+
+type Query {
+  repository( followRenames: Boolean = true name: String! owner: String! ): Repository
+}
+
+type Repository {
+  issue( number: Int! ): Issue
+}
+
+type Issue {
+  author: Actor
+  body: String!
+  editor: Actor
+  lastEditedAt: DateTime
+  userContentEdits( after: String before: String first: Int last: Int ): UserContentEditConnection
+}
+
+type UserContentEditConnection {
+  nodes: [UserContentEdit]
+  totalCount: Int!
+}
+
+type UserContentEdit {
+  editedAt: DateTime!
+  editor: Actor
+}
+
+interface Actor {
+  login: String!
+}

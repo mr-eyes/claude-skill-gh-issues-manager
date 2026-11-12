@@ -55,9 +55,11 @@ def show_command(args, note=""):
 def project_root():
     """The one folder a configuration file is read from.
 
-    CLAUDE_PROJECT_DIR when set, else the top of the git checkout, else the
-    current folder. Parent folders are never searched: a file planted above the
-    project must not be able to configure it.
+    CLAUDE_PROJECT_DIR when set (Claude Code sets it for hooks, not for
+    commands an agent runs), else the top of the git checkout that contains the
+    current folder, else the current folder. Parent folders are never searched
+    for a configuration file: a file planted above the project must not be
+    able to configure it.
     """
     env = os.environ.get("CLAUDE_PROJECT_DIR")
     if env:
@@ -130,19 +132,28 @@ def trusted_repos():
 
 
 def allowed_users(repo, trusted=None):
-    """Logins whose hub text may be shown: the repository owner plus the users
-    listed for the repository in the user-level trusted file."""
-    trusted = trusted_repos() if trusted is None else trusted
-    return {repo.split("/")[0].lower()} | trusted.get(repo.lower(), set())
+    """Logins whose hub text may be shown.
 
+    Empty unless the user trusted the repository. For a trusted repository: its
+    owner plus the logins listed for it in the user-level trusted file.
+    """
+    trusted = trusted_repos() if trusted is None else trusted
+    if repo.lower() not in trusted:
+        return set()
+    return {repo.split("/")[0].lower()} | trusted[repo.lower()]
+
+
+EDITS_CHECKED = 100
 
 HUB_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       body
       author { login }
-      lastEditedBy { login }
-      userContentEdits(first: 100) { totalCount nodes { editor { login } } }
+      editor { login }
+      lastEditedAt
+      head: userContentEdits(first: 100) { totalCount nodes { editedAt editor { login } } }
+      tail: userContentEdits(last: 100) { nodes { editedAt editor { login } } }
     }
   }
 }"""
@@ -151,10 +162,15 @@ HUB_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
 def read_hub_with_editors(repo, number, timeout=60):
     """One call that returns the hub body together with who wrote and edited it.
 
-    Returns (body, author, editors, complete). `author` is None for a deleted
-    account; `editors` is a set of logins and contains None when an editor is
-    unknown; `complete` is False when the edit history is longer than what was
-    returned.
+    Returns (body, author, editors, problem).
+    - author: login, or None for a deleted account.
+    - editors: logins of the account named as the issue's current editor and of
+      the newest EDITS_CHECKED body edits. None stands for an unknown account.
+      Both ends of the edit list are fetched and the newest entries are chosen
+      by their editedAt time, so the result does not depend on the order in
+      which the API lists edits.
+    - problem: None, or the reason the edit history could not be trusted
+      (the issue was edited but no edit, or not the newest one, was returned).
     """
     owner, name = repo.split("/")
     raw = gh(["api", "graphql", "-f", "query=" + HUB_QUERY, "-f", "owner=" + owner,
@@ -162,14 +178,31 @@ def read_hub_with_editors(repo, number, timeout=60):
     issue = (((json.loads(raw).get("data") or {}).get("repository") or {}).get("issue"))
     if not issue:
         raise GhError("hub %s#%d not found" % (repo, number))
-    login = lambda node: (node or {}).get("login")
-    edits = issue.get("userContentEdits") or {}
-    nodes = edits.get("nodes") or []
-    editors = {login(node.get("editor")) for node in nodes if node}
-    if issue.get("lastEditedBy") is not None or nodes:
-        editors.add(login(issue.get("lastEditedBy")))
-    complete = (edits.get("totalCount") or 0) <= len(nodes)
-    return issue.get("body") or "", login(issue.get("author")), editors, complete
+
+    def login(node):
+        return (node or {}).get("login")
+
+    edits = {}
+    for end in ("head", "tail"):
+        for node in ((issue.get(end) or {}).get("nodes") or []):
+            if node and node.get("editedAt"):
+                edits.setdefault((node["editedAt"], login(node.get("editor"))), None)
+    newest = sorted(edits, reverse=True)[:EDITS_CHECKED]
+    editors = {who for _, who in newest}
+    last_edited = issue.get("lastEditedAt")
+    problem = None
+    if last_edited:
+        editors.add(login(issue.get("editor")))
+        if not newest:
+            problem = "the issue was edited but its edit history came back empty"
+        elif newest[0][0] < last_edited:
+            problem = "the newest edit was not in the returned edit history"
+    return issue.get("body") or "", login(issue.get("author")), editors, problem
+
+
+def describe(config, repo):
+    """The line every writing or dry-running script prints first."""
+    return "config: %s  repo: %s" % (config.get("_path") or "none (repository given on the command line or in the manifest)", repo)
 
 
 def resolve_repo(cli_value, cfg):
@@ -266,32 +299,39 @@ def substitute_placeholders(text, numbers, target_repo, home_repo):
 
     In prose the reference is #N (or owner/repo#N when the text is posted to a
     repository other than the one the issues live in). Inside a Mermaid block it
-    is "Issue N", because # breaks Mermaid on GitHub.
+    is "Issue N", because # breaks Mermaid on GitHub. Inline code spans and
+    fenced blocks other than Mermaid are left as they are.
     """
-    out, in_mermaid, fence = [], False, None
+    out, region, fence = [], "prose", None
+
+    def repl(match):
+        key = match.group(1)
+        if key not in numbers:
+            return match.group(0)
+        if region == "mermaid":
+            return "Issue %d" % numbers[key]
+        if target_repo != home_repo:
+            return "%s#%d" % (home_repo, numbers[key])
+        return "#%d" % numbers[key]
+
     for line in text.split("\n"):
         stripped = line.strip()
-        if fence is None and re.match(r"^(```+|~~~+)", stripped):
-            fence = re.match(r"^(```+|~~~+)", stripped).group(1)
-            in_mermaid = stripped[len(fence):].strip().lower() == "mermaid"
+        opening = re.match(r"^(```+|~~~+)", stripped)
+        if fence is None and opening:
+            fence = opening.group(1)
+            region = "mermaid" if stripped[len(fence):].strip().lower() == "mermaid" else "code"
             out.append(line)
-            continue
-        if fence is not None and stripped.startswith(fence) and stripped.strip(fence[0]) == "":
-            fence, in_mermaid = None, False
+        elif fence is not None and stripped.startswith(fence) and stripped.strip(fence[0]) == "":
+            fence, region = None, "prose"
             out.append(line)
-            continue
-
-        def repl(match):
-            key = match.group(1)
-            if key not in numbers:
-                return match.group(0)
-            if in_mermaid:
-                return "Issue %d" % numbers[key]
-            if target_repo != home_repo:
-                return "%s#%d" % (home_repo, numbers[key])
-            return "#%d" % numbers[key]
-
-        out.append(PLACEHOLDER_RE.sub(repl, line))
+        elif region == "code":
+            out.append(line)
+        elif region == "mermaid":
+            out.append(PLACEHOLDER_RE.sub(repl, line))
+        else:
+            parts = re.split(r"(`[^`\n]*`)", line)
+            out.append("".join(part if part.startswith("`") and part.endswith("`") and len(part) > 1
+                               else PLACEHOLDER_RE.sub(repl, part) for part in parts))
     return "\n".join(out)
 
 
