@@ -12,7 +12,7 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 | `comment-failure.md` | `failure` | A failed run, approach or change |
 | `comment-checkpoint.md` | `checkpoint` | State of work in flight at the end of a stretch |
 | `comment-correction.md` | `correction` | A posted statement or number was wrong |
-| `resume-block.md` | (checked by `resume_block.py`) | The hub's resume block |
+| `resume-block.md` | `resume` | A resume comment on the hub: heading, markers and the block |
 | `pointer-comment.md` | `pointer` | The short note left in an older tracker |
 | `migration-map.md` | `generic` | The survey table of a migration |
 | `manifest.example.json` | | The list of drafts for `create_issues.py` |
@@ -22,7 +22,7 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 
 ## Field notes
 
-**Timestamps.** Always date, time and zone in the tracker's convention: `2026-03-04 14:10 PST`. Get it with `date '+%Y-%m-%d %H:%M %Z'`. The header of every event comment and the "Last updated" line of the resume block must carry one.
+**Timestamps.** Always date, time and zone in the tracker's convention: `2026-03-04 14:10 PST`. Get it with `date '+%Y-%m-%d %H:%M %Z'`. The header of every event comment, and the heading and "Last updated" line of a resume comment, must carry one.
 
 **Numbers.** Value, denominator, source path, every time: "41 of 53 files (`tests/conformance/report-4f2a9c1.txt`)". Open the source file and read the number from it while drafting. A percentage alone is not a number.
 

@@ -37,6 +37,7 @@ The dry run without `--existing` does not read the repository and lists every la
 Create a drafts folder that holds nothing but drafts (for example `.tmp/drafts/bootstrap/`, kept out of version control). From the templates write:
 
 - `hub.md` from `templates/hub.md`
+- `resume-1.md` from `templates/resume-block.md`, the first resume comment, listed in the manifest as a comment on `NEW-hub` with kind `resume`, so the hub never exists without one
 - one `topic-<name>.md` per topic from `templates/final-record.md`
 - optionally the first active task from `templates/active-task.md`
 
@@ -59,7 +60,7 @@ An issue whose draft contains placeholders is created with a one-line stub body 
 ## 6. Finish
 
 1. Put the hub number into `.gh-issues-manager.json` as `hub`.
-2. Run `python3 scripts/resume_block.py show --active` to confirm the block reads back.
+2. Run `python3 scripts/resume_block.py show --active` to confirm the first resume comment reads back. This needs the repository in the user's trusted list; if it is not, the command says so and the user decides.
 3. Post the frame agreed in step 1 as a decision comment on the hub, with the owner's exact words.
 4. Offer the CLAUDE.md snippet and the SessionStart hook (see [session-protocol.md](session-protocol.md)). The hook prints nothing until the user adds the repository to their own trusted list; give them the line to add.
 5. Take a first snapshot if offline reading matters.

@@ -5,6 +5,7 @@
     {"key": "parser", "kind": "final-record", "title": "Parser", "labels": ["final-record", "topic:parser"], "body_file": "topic-parser.md"}
   ],
   "comments": [
+    {"issue": "NEW-hub", "kind": "resume", "body_file": "resume-1.md"},
     {"issue": "NEW-parser", "kind": "result", "body_file": "result-parser-1.md"}
   ]
 }

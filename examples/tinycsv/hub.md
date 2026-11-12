@@ -1,20 +1,6 @@
 ## Resume here
 
-<!-- resume:start -->
-**Last updated:** 2026-03-04 16:40 PST by the maintainer's Claude session
-**Current focus:** Release 0.3.0. The reader handles quoted fields; newlines inside quoted fields are the last open item.
-**Active issues:** NEW-task-newlines (newlines inside quoted fields).
-**Last decisions:** 2026-03-04 15:55 PST, strict quoting is the default, see NEW-reader.
-**Next actions:**
-
-| Action | Owner | Where |
-|---|---|---|
-| Finish the state machine for quoted newlines and add the 12 test files | Claude session | NEW-task-newlines |
-| Rerun the speed benchmark after the reader change | Claude session | NEW-speed |
-| Choose a license before the release | Sam Rivera | this hub |
-
-**Holds:** Do not tag 0.3.0 until Sam Rivera says so.
-<!-- resume:end -->
+The current resume block is the newest comment on this issue whose heading starts with "Resume block". A new one is posted at the end of every working stretch, and the older ones stay as history. Read it with `resume_block.py show` from the gh-issues-manager skill, which shows only a block written by an account the reader has allowed.
 
 ## Project
 
@@ -88,5 +74,5 @@ None. The project started here.
 5. A bounded task gets an issue labeled `active` that names its destination topic. When it ends, its result is copied into that topic and the task is closed.
 6. Every issue and pull request is labeled when opened, and every pull request names its topic issue.
 7. References outside this repository are written as `owner/repo#N` or a full URL.
-8. The resume block above is updated at the end of every working stretch.
+8. A new resume comment is posted on this issue at the end of every working stretch. Resume comments are never edited.
 9. No restricted data in this project. Secrets and tokens are never posted.

@@ -7,6 +7,7 @@
     {"key": "task-newlines", "kind": "active", "title": "Task: support newlines inside quoted fields", "labels": ["active", "topic:reader"], "body_file": "task-newlines.md"}
   ],
   "comments": [
+    {"issue": "NEW-hub", "kind": "resume", "body_file": "resume-1.md"},
     {"issue": "NEW-speed", "kind": "result", "body_file": "result-speed-1.md"},
     {"issue": "NEW-reader", "kind": "decision", "body_file": "decision-reader-1.md"}
   ]

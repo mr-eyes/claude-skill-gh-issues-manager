@@ -19,7 +19,7 @@ One issue, pinned, label `hub`. It is the single entry point: a reader who knows
 
 | Section | Holds |
 |---|---|
-| Resume here | The resume block between `<!-- resume:start -->` and `<!-- resume:end -->`: last updated, current focus, active issues, last decisions, next actions with owners, holds |
+| Resume here | A fixed note saying that the current resume block is the newest "Resume block" comment on the hub |
 | Project | A short statement of the project and the tracker's time convention |
 | Map | A Mermaid flowchart: deliverable sections, the topic issues that feed them, the pull requests behind the topics |
 | Deliverable sections | One table per section of the deliverable, listing the topic issues that feed it |
@@ -28,6 +28,8 @@ One issue, pinned, label `hub`. It is the single entry point: a reader who knows
 | Labels | The label legend |
 | Older tracker | One row per item of an older tracker and its new home, or "None" |
 | Recording rules | The rules for recording new work |
+
+The resume block itself is not in the body. It is a comment on the hub, posted anew at the end of every working stretch from `templates/resume-block.md`: last updated, current focus, active issues, last decisions, next actions with owners, holds. Comments have one author each and are never edited here, which is what lets the hook check who wrote the block before showing it (see [session-protocol.md](session-protocol.md)).
 
 The hub holds pointers and current summaries, not detail. Detail lives in the topic issues. The hub is edited in place; it has no history of its own to protect beyond the "Number sources" table, where a replaced number is moved to the topic's folded block, not silently overwritten.
 
@@ -95,7 +97,7 @@ Bounded work that does not yet belong in a record (an investigation, a refactor,
 1. Post the outcome as a result (or failure) comment on the destination topic.
 2. Write the outcome and the link to that comment into the task's "Result" section.
 3. Close the task. The `active` label stays, so closed tasks remain findable; "open and labeled `active`" is the list of work in flight.
-4. Update the resume block.
+4. Post a new resume block.
 
 A task that ends with nothing to report still gets a result: "no change, because ...".
 
@@ -120,6 +122,6 @@ Every pull request names its topic issue in its description ("Topic: #12"), carr
 | A finished measurement | Result comment on the topic; then "Current state", "Results" and the hub's number sources if it is the new headline |
 | The owner said yes, no or "do it this way" | Decision comment with their exact words; then the topic's "Decisions" table |
 | A crash, a dead end, a rejected idea | Failure comment; then "Negative results and limitations" |
-| A plan for the next hours | The resume block and, if work is in flight, a checkpoint comment |
+| A plan for the next hours | A new resume comment on the hub and, if work is in flight, a checkpoint comment |
 | A doubt about an earlier number | Correction comment once checked; until then an item under "Not established" or "Open work" |
 | A file path that matters | "Code and evidence" of the topic |

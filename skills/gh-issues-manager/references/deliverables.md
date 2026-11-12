@@ -4,7 +4,7 @@ The record is organized so that writing the paper, release notes or report is as
 
 ## Before writing
 
-1. Read the hub in full. Check that its "Last updated" is recent and that no issue labeled `needs-decision` is open for a section you are about to write.
+1. Read the hub in full. Check that the newest resume comment is recent and that no issue labeled `needs-decision` is open for a section you are about to write.
 2. For the section at hand, open its table under "Deliverable sections" and read every listed final record from top to bottom.
 3. For each record, read the newest comments after the "As of" date in "Current state". If a result, decision or correction is newer than the current state, the record is stale: update it first (SKILL.md, "Change a conclusion"), then write.
 
@@ -32,4 +32,4 @@ When the deliverable needs something the record lacks, that is a finding about t
 
 ## After the deliverable ships
 
-Post a result comment on the hub naming the version that shipped (tag, DOI, submission identifier) and the commit of every input, update the resume block, and take a snapshot so the state at release is kept offline as well.
+Post a result comment on the hub naming the version that shipped (tag, DOI, submission identifier) and the commit of every input, post a new resume block, and take a snapshot so the state at release is kept offline as well.

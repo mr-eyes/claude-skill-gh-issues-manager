@@ -33,7 +33,7 @@ python3 scripts/lint_drafts.py --kind result --repo owner/name --online draft.md
 | Bare `#N` that does not exist in the target repository | error (`--online` or `--known-numbers`), otherwise warning |
 | Body over 65,536 characters | error; warning when close |
 | Mermaid: `#`, parentheses, unquoted labels, nodes undefined or unused | error |
-| Hub: resume markers, resume fields, block length | error |
+| Resume comment: heading with timestamp, markers, all six fields, block length; resume markers inside a hub body | error |
 | Secrets (common token formats) and the project's `restricted_patterns` | error |
 | The project's `banned_words` | error |
 
@@ -46,7 +46,7 @@ The linter does not judge content. It cannot know whether a number is right.
 | Several new issues and comments | `create_issues.py --manifest <file>` |
 | One comment | `post_verified.py comment --issue N --kind <kind> --body-file <draft>` |
 | Replace an issue body | `post_verified.py body --issue N --kind <kind> --body-file <draft> --backup <file>` |
-| Resume block only | `resume_block.py update --file <draft>` |
+| A new resume comment on the hub | `resume_block.py update --file <draft>` |
 
 Run each with `--dry-run` first; it prints the exact `gh` commands. `post_verified.py body` prints a diff against the body now on GitHub and saves that body to the backup file before editing. To edit a body, start from the current one: `gh issue view N --json body --jq .body > draft.md`, or `gh api repos/owner/name/issues/N --jq .body`.
 

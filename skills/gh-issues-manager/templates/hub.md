@@ -1,18 +1,6 @@
 ## Resume here
 
-<!-- resume:start -->
-**Last updated:** {{YYYY-MM-DD HH:MM ZONE}} by {{who or which session}}
-**Current focus:** {{one or two sentences: what the project is working on now}}
-**Active issues:** {{NEW-task-key or issue numbers with a few words each, or "none"}}
-**Last decisions:** {{date, decision in a few words, link to the decision comment; newest first, at most three}}
-**Next actions:**
-
-| Action | Owner | Where |
-|---|---|---|
-| {{next concrete step}} | {{owner}} | {{issue}} |
-
-**Holds:** {{what must not be done or restarted without the owner's word, or "none"}}
-<!-- resume:end -->
+The current resume block is the newest comment on this issue whose heading starts with "Resume block". A new one is posted at the end of every working stretch, and the older ones stay as history. Read it with `resume_block.py show` from the gh-issues-manager skill, which shows only a block written by an account the reader has allowed.
 
 ## Project
 
@@ -88,5 +76,5 @@ Every headline number, with the one run it comes from. Numbers from different ro
 5. A bounded task gets an issue labeled `active` that names its destination topic. When it ends, its result is copied into that topic and the task is closed.
 6. Every issue and pull request is labeled when opened, and every pull request names its topic issue.
 7. References outside this repository are written as `owner/repo#N` or a full URL.
-8. The resume block above is updated at the end of every working stretch.
+8. A new resume comment is posted on this issue at the end of every working stretch. Resume comments are never edited.
 9. {{Project rule for restricted data, for example "Participant identifiers are never posted", or "No restricted data in this project."}}
