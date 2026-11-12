@@ -5,6 +5,8 @@ It keeps a small repository in a JSON file (FAKE_GH_STATE) and answers the
 subset of gh commands the scripts use, in the formats the real gh prints.
 Fault switches:
   FAKE_GH_FAIL_ON="issue edit"   exit 1 for commands starting with these words
+  FAKE_GH_FAIL_AFTER="issue create"  do the work, then exit 1 (a timeout after GitHub acted)
+  FAKE_GH_CHANGE_ON_READ=2       change the issue body just before the 2nd REST read of an issue
   FAKE_GH_CORRUPT=1              store bodies with one character changed
   FAKE_GH_SLEEP=5                sleep before answering
 """
@@ -14,6 +16,12 @@ import os
 import re
 import sys
 import time
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import graphql_check  # noqa: E402
+
+ME = "octo-dev"
 
 
 def load():
@@ -68,7 +76,7 @@ def api_issue(state, repo, number):
 def api_comment(state, repo, cid):
     comment = state["comments"][str(cid)]
     return {
-        "id": int(cid), "body": comment["body"], "user": {"login": comment.get("user", "octo-dev")},
+        "id": int(cid), "body": comment["body"], "user": {"login": comment.get("user", ME)},
         "created_at": comment.get("created_at", "2026-01-07T09:15:00Z"),
         "issue_url": "https://api.github.com/repos/%s/issues/%d" % (repo, comment["issue"]),
         "html_url": "https://github.com/%s/issues/%d#issuecomment-%s" % (repo, comment["issue"], cid),
@@ -118,36 +126,72 @@ def main():
         print("https://github.com/%s/issues/%s#issuecomment-%d" % (repo, args[2], cid))
     elif words == "issue pin":
         state["issues"][args[2]]["pinned"] = True
+    elif words == "issue view":
+        print(json.dumps({"isPinned": bool(state["issues"][args[2]].get("pinned"))}))
     elif words == "issue list":
-        label = option(args, "--label")
-        rows = [{"number": int(n), "title": i["title"], "updatedAt": i.get("updated_at", "2026-01-06T18:30:00Z"),
-                 "author": {"login": i.get("user", "octo-dev")}}
-                for n, i in sorted(state["issues"].items(), key=lambda kv: int(kv[0]))
-                if label in i.get("labels", []) and i.get("state", "open") == "open"]
+        label, author = option(args, "--label"), option(args, "--author")
+        rows = []
+        for n, i in sorted(state["issues"].items(), key=lambda kv: -int(kv[0])):
+            if label and (label not in i.get("labels", []) or i.get("state", "open") != "open"):
+                continue
+            if author == "@me" and i.get("user", ME) != ME:
+                continue
+            rows.append({"number": int(n), "title": i["title"], "body": i["body"],
+                         "url": "https://github.com/%s/issues/%s" % (repo, n),
+                         "labels": [{"name": name} for name in i.get("labels", [])]})
         print(json.dumps(rows))
     elif args[:2] == ["api", "graphql"]:
         fields = dict(a.split("=", 1) for a in option(args, "-f", many=True) + option(args, "-F", many=True))
+        problems = graphql_check.check(fields["query"])
+        if problems:  # the real API rejects the whole query
+            print(json.dumps({"errors": [{"message": m} for m in problems]}))
+            fail("gh: " + problems[0])
         issue = state["issues"].get(fields["number"])
         if issue is None:
             print(json.dumps({"data": {"repository": {"issue": None}}}))
         else:
             person = lambda name: {"login": name} if name else None
-            editors = issue.get("editors", [])
-            print(json.dumps({"data": {"repository": {"issue": {
-                "body": issue["body"],
-                "author": person(issue.get("user", "octo-dev")),
-                "lastEditedBy": person(editors[-1]) if editors else None,
-                "userContentEdits": {"totalCount": issue.get("edit_count", len(editors)),
-                                     "nodes": [{"editor": person(e)} for e in editors]},
-            }}}}))
+            edits = issue.get("edits")
+            if edits is None:
+                edits = [{"at": "2026-01-02T00:%02d:00Z" % i, "by": who} for i, who in enumerate(issue.get("editors", []))]
+            newest = max(edits, key=lambda e: e["at"]) if edits else None
+            selection = graphql_check.parse_query(fields["query"])[0][3][0][3]
+            out = {}
+            for alias, name, arguments, children in selection:
+                if name == "body":
+                    out[alias] = issue["body"]
+                elif name == "author":
+                    out[alias] = person(issue.get("user", ME))
+                elif name == "editor":
+                    out[alias] = person(issue.get("editor", newest["by"] if newest else None))
+                elif name == "lastEditedAt":
+                    out[alias] = issue.get("last_edited_at", newest["at"] if newest else None)
+                elif name == "userContentEdits":
+                    rows = edits[:int(arguments["first"])] if "first" in arguments else edits[-int(arguments["last"]):]
+                    out[alias] = {"totalCount": len(edits),
+                                  "nodes": [{"editedAt": e["at"], "editor": person(e["by"])} for e in rows]}
+            print(json.dumps({"data": {"repository": {"issue": out}}}))
     elif args[0] == "api":
+        if "user" in args[1:]:
+            print(ME if option(args, "--jq") == ".login" else json.dumps({"login": ME}))
+            return
         path = [a for a in args[1:] if a.startswith("repos/")][0]
         jq = option(args, "--jq")
         match = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/comments/(\d+)", path)
+        listing = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)/comments(\?.*)?", path)
+        if listing:
+            rows = [api_comment(state, listing.group(1), c) for c in sorted(state["comments"], key=int)
+                    if state["comments"][c]["issue"] == int(listing.group(2))]
+            sys.stdout.write(json.dumps(rows))
+            save(state)
+            return
         if match:
             out = api_comment(state, match.group(1), match.group(2))
         elif re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)", path):
             match = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)", path)
+            state["reads"] = state.get("reads", 0) + 1
+            if str(state["reads"]) == os.environ.get("FAKE_GH_CHANGE_ON_READ"):
+                state["issues"][match.group(2)]["body"] += "\nEdited by someone else meanwhile."
             out = api_issue(state, match.group(1), match.group(2))
             if jq == ".number":
                 print(out["number"])
@@ -172,6 +216,9 @@ def main():
     else:
         fail("fake gh: unsupported command %s" % words, 3)
     save(state)
+    fail_after = os.environ.get("FAKE_GH_FAIL_AFTER")
+    if fail_after and words.startswith(fail_after):
+        fail("gh: simulated timeout after the request was carried out")
 
 
 if __name__ == "__main__":
