@@ -3,7 +3,7 @@
 # startup, resume and compaction. Plain stdout from a SessionStart hook is added
 # to the session context. It prints only when the user has trusted the
 # configured repository (see the README, "Security model") and the comment was
-# written, and if edited then edited only, by allowed accounts. Any failure (no config, no gh,
+# written by an allowed account and never edited. Any failure (no config, no gh,
 # offline, slow) prints nothing and exits 0, so a session is never blocked.
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || exit 0

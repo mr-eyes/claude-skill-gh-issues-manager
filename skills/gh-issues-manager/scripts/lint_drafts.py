@@ -389,10 +389,11 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
 
     check_sections(text, kind, template, add)
 
+    if kind != "resume" and (ghim.RESUME_START in text or ghim.RESUME_END in text):
+        add("error", "resume-markers-misplaced", 0,
+            "resume markers belong only in a resume comment on the hub (kind 'resume'); remove them here")
+
     if kind == "hub":
-        if ghim.RESUME_START in text or ghim.RESUME_END in text:
-            add("error", "resume-in-hub", 0,
-                "the resume block is a comment on the hub, not part of its body; remove the markers")
         if not mermaid_blocks:
             add("warning", "hub-map", 0, "the hub has no Mermaid map")
 

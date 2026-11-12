@@ -201,31 +201,26 @@ def read_hub_comments(repo, number, timeout=60):
             "edit_total": edits.get("totalCount") or 0,
             "edit_editors": [login(e.get("editor")) for e in (edits.get("nodes") or []) if e],
         })
-    comments.sort(key=lambda c: c["created"], reverse=True)
-    return comments
+    # newest first; of two comments created in the same second, the one the API lists later wins
+    order = sorted(range(len(comments)), key=lambda i: (comments[i]["created"], i), reverse=True)
+    return [comments[i] for i in order]
 
 
 def resume_comment_problem(comment, allowed):
     """Why a comment that carries the resume markers may not be shown, or None.
 
-    Fail closed: the author, the current editor and every editor in the edit
-    history must be allowed, and the history must be complete.
+    Fail closed. Resume comments are append-only: the author must be allowed
+    and the comment must never have been edited, by anyone. (On GitHub an
+    unedited comment has no lastEditedAt and an empty edit history; an edited
+    one lists its edits plus an entry for its creation.)
     """
-    def ok(name):
-        return bool(name) and name.lower() in allowed
-
     if extract_resume_block(comment["body"]) is None:
         return "malformed markers"
-    if not ok(comment["author"]):
+    author = comment["author"]
+    if not author or author.lower() not in allowed:
         return "written by a non-allowed account"
-    edited = bool(comment["last_edited"]) or comment["edit_total"] > 0 or bool(comment["edit_editors"])
-    if edited:
-        if comment["last_edited"] and not ok(comment["editor"]):
-            return "edited by a non-allowed account"
-        if not comment["edit_editors"] or comment["edit_total"] > len(comment["edit_editors"]):
-            return "edited, with an edit history that could not be read in full"
-        if not all(ok(name) for name in comment["edit_editors"]):
-            return "edited by a non-allowed account"
+    if comment["last_edited"] or comment["edit_total"] > 0 or comment["edit_editors"]:
+        return "edited after posting"
     return None
 
 
@@ -389,11 +384,35 @@ def read_text(path):
 
 
 def extract_resume_block(body):
-    """Return the text between the resume markers, or None when they are absent or malformed."""
+    """Return the text between the resume markers, or None when the text is not a well-formed resume comment.
+
+    Well-formed means: the first non-blank line starts with the resume heading;
+    each marker occurs exactly once in the whole text; each stands alone on its
+    own line at column 0, outside any fenced block, start before end. A marker
+    inside a blockquote, a code span or a fenced block therefore never counts.
+    """
     if body.count(RESUME_START) != 1 or body.count(RESUME_END) != 1:
         return None
-    start = body.index(RESUME_START) + len(RESUME_START)
-    end = body.index(RESUME_END)
-    if end < start:
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    first = next((line for line in lines if line.strip()), "")
+    if not first.startswith(RESUME_HEADING):
         return None
-    return body[start:end].strip("\n")
+    start = end = None
+    fence = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        opening = re.match(r"^(```+|~~~+)", stripped)
+        if fence is None and opening:
+            fence = opening.group(1)
+            continue
+        if fence is not None:
+            if stripped.startswith(fence) and stripped.strip(fence[0]) == "":
+                fence = None
+            continue
+        if line.rstrip() == RESUME_START:
+            start = index
+        elif line.rstrip() == RESUME_END:
+            end = index
+    if start is None or end is None or end < start:
+        return None
+    return "\n".join(lines[start + 1:end]).strip("\n")
