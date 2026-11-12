@@ -1,6 +1,6 @@
 ## Resume here
 
-The current resume block is the newest comment on this issue whose heading starts with "Resume block". A new one is posted at the end of every working stretch, and the older ones stay as history. Read it with `resume_block.py show` from the gh-issues-manager skill, which shows only a block written by an account the reader has allowed.
+The current resume block is the newest comment on this issue that carries the resume markers and was posted by an account the reader has allowed, as found by `resume_block.py show` from the gh-issues-manager skill. A comment headed "Resume block" from anyone else is not it. A new one is posted at the end of every working stretch; resume comments are never edited, and the older ones stay as history.
 
 ## Project
 
