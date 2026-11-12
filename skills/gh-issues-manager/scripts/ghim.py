@@ -52,24 +52,41 @@ def show_command(args, note=""):
     return text + ("   # " + note if note else "")
 
 
-def find_config(start=None):
-    """Return the path of the nearest .gh-issues-manager.json at or above start."""
+def project_root():
+    """The one folder a configuration file is read from.
+
+    CLAUDE_PROJECT_DIR when set, else the top of the git checkout, else the
+    current folder. Parent folders are never searched: a file planted above the
+    project must not be able to configure it.
+    """
+    env = os.environ.get("CLAUDE_PROJECT_DIR")
+    if env:
+        return os.path.abspath(env)
+    try:
+        proc = subprocess.run(["git", "rev-parse", "--show-toplevel"],
+                              capture_output=True, text=True, timeout=5)
+        if proc.returncode == 0 and proc.stdout.strip():
+            return os.path.abspath(proc.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return os.getcwd()
+
+
+def find_config():
+    """Path of the project's configuration file, or None.
+
+    GHIM_CONFIG, set by the user, names a file explicitly. Otherwise only
+    <project root>/.gh-issues-manager.json is considered.
+    """
     env = os.environ.get("GHIM_CONFIG")
     if env:
         return env if os.path.isfile(env) else None
-    here = os.path.abspath(start or os.getcwd())
-    while True:
-        candidate = os.path.join(here, CONFIG_NAME)
-        if os.path.isfile(candidate):
-            return candidate
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    candidate = os.path.join(project_root(), CONFIG_NAME)
+    return candidate if os.path.isfile(candidate) else None
 
 
-def load_config(start=None):
-    path = find_config(start)
+def load_config():
+    path = find_config()
     if not path:
         return {}
     with open(path, encoding="utf-8") as handle:
@@ -78,6 +95,81 @@ def load_config(start=None):
         raise ValueError("%s must hold a JSON object" % path)
     cfg["_path"] = path
     return cfg
+
+
+def trusted_file():
+    env = os.environ.get("GHIM_TRUSTED_FILE")
+    if env:
+        return env
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "gh-issues-manager", "trusted-repos")
+
+
+def trusted_repos():
+    """Repositories the user has trusted, as {"owner/name": {extra allowed logins}}.
+
+    Read from the user-level file (one "owner/name [login ...]" per line, # for
+    comments) and from GHIM_TRUSTED_REPOS (comma-separated owner/name). Both
+    belong to the user; nothing inside a project can add to this list.
+    Keys and logins are lowercase.
+    """
+    trusted = {}
+    try:
+        with open(trusted_file(), encoding="utf-8") as handle:
+            for line in handle:
+                parts = line.split("#", 1)[0].split()
+                if parts and re.fullmatch(r"[\w.-]+/[\w.-]+", parts[0]):
+                    trusted.setdefault(parts[0].lower(), set()).update(p.lower() for p in parts[1:])
+    except OSError:
+        pass
+    for name in os.environ.get("GHIM_TRUSTED_REPOS", "").split(","):
+        name = name.strip().lower()
+        if re.fullmatch(r"[\w.-]+/[\w.-]+", name):
+            trusted.setdefault(name, set())
+    return trusted
+
+
+def allowed_users(repo, trusted=None):
+    """Logins whose hub text may be shown: the repository owner plus the users
+    listed for the repository in the user-level trusted file."""
+    trusted = trusted_repos() if trusted is None else trusted
+    return {repo.split("/")[0].lower()} | trusted.get(repo.lower(), set())
+
+
+HUB_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      body
+      author { login }
+      lastEditedBy { login }
+      userContentEdits(first: 100) { totalCount nodes { editor { login } } }
+    }
+  }
+}"""
+
+
+def read_hub_with_editors(repo, number, timeout=60):
+    """One call that returns the hub body together with who wrote and edited it.
+
+    Returns (body, author, editors, complete). `author` is None for a deleted
+    account; `editors` is a set of logins and contains None when an editor is
+    unknown; `complete` is False when the edit history is longer than what was
+    returned.
+    """
+    owner, name = repo.split("/")
+    raw = gh(["api", "graphql", "-f", "query=" + HUB_QUERY, "-f", "owner=" + owner,
+              "-f", "name=" + name, "-F", "number=%d" % number], timeout=timeout)
+    issue = (((json.loads(raw).get("data") or {}).get("repository") or {}).get("issue"))
+    if not issue:
+        raise GhError("hub %s#%d not found" % (repo, number))
+    login = lambda node: (node or {}).get("login")
+    edits = issue.get("userContentEdits") or {}
+    nodes = edits.get("nodes") or []
+    editors = {login(node.get("editor")) for node in nodes if node}
+    if issue.get("lastEditedBy") is not None or nodes:
+        editors.add(login(issue.get("lastEditedBy")))
+    complete = (edits.get("totalCount") or 0) <= len(nodes)
+    return issue.get("body") or "", login(issue.get("author")), editors, complete
 
 
 def resolve_repo(cli_value, cfg):

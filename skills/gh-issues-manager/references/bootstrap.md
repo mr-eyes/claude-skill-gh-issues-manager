@@ -1,6 +1,6 @@
 # Bootstrapping a new project
 
-Paths below are relative to the skill folder. Run the commands from the project root so the scripts find `.gh-issues-manager.json`.
+Paths below are relative to the skill folder. The scripts read `.gh-issues-manager.json` from the project root only (`CLAUDE_PROJECT_DIR`, else the top of the git checkout, else the current folder).
 
 ## 1. Agree on the frame with the owner
 
@@ -59,7 +59,7 @@ An issue whose draft contains placeholders is created with a one-line stub body 
 1. Put the hub number into `.gh-issues-manager.json` as `hub`.
 2. Run `python3 scripts/resume_block.py show --active` to confirm the block reads back.
 3. Post the frame agreed in step 1 as a decision comment on the hub, with the owner's exact words.
-4. Offer the CLAUDE.md snippet and the SessionStart hook (see [session-protocol.md](session-protocol.md)).
+4. Offer the CLAUDE.md snippet and the SessionStart hook (see [session-protocol.md](session-protocol.md)). The hook prints nothing until the user adds the repository to their own trusted list; give them the line to add.
 5. Take a first snapshot if offline reading matters.
 
 ## Adding to an existing repository

@@ -35,7 +35,26 @@ claude plugin marketplace add mr-eyes/claude-skill-gh-issues-manager
 claude plugin install gh-issues-manager@mr-eyes-skills
 ```
 
-The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's SessionStart hook is active in every project but prints nothing unless the project has a `.gh-issues-manager.json` file.
+The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's SessionStart hook is registered for every project but prints nothing until you trust a repository (next section).
+
+### Trust the repositories whose hub the hook may print
+
+The hook puts text from a GitHub issue into every session, so it is off until you opt in, per repository, in a file that belongs to you and not to any project:
+
+```bash
+mkdir -p ~/.config/gh-issues-manager
+echo "your-name/your-project" >> ~/.config/gh-issues-manager/trusted-repos
+```
+
+Each line is `owner/name`, optionally followed by GitHub logins that may write the hub besides the repository owner:
+
+```text
+# owner/name   extra allowed logins
+your-name/your-project
+your-lab/shared-project   your-name   a-colleague
+```
+
+For a repository owned by an organization, list the people who maintain the hub, because the owner is then not a person. `GHIM_TRUSTED_REPOS` (comma-separated `owner/name`) does the same for one shell. See "Security model" below for what this protects against.
 
 ### As a plain skill
 
@@ -85,7 +104,7 @@ The resume block is small on purpose (under 4,000 characters) and is rewritten a
 
 ## The optional hook and CLAUDE.md snippet
 
-**Hook.** `scripts/session_start_hook.sh` runs on the SessionStart event for the `startup`, `resume` and `compact` sources and prints the resume block plus the list of open active issues; Claude Code adds that output to the session context. It exits quietly, printing nothing, when the project has no configuration file, when `gh` is missing or offline, or when GitHub does not answer within 10 seconds. The plugin installs it. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the path.
+**Hook.** `scripts/session_start_hook.sh` runs on the SessionStart event for the `startup`, `resume` and `compact` sources and prints the resume block plus the list of open active issues; Claude Code adds that output to the session context. It prints nothing when the project has no configuration file, when the repository is not in your trusted list, when `gh` is missing or offline, or when GitHub does not answer within 10 seconds. If the hub was written or edited by an account outside the allowed list, it prints one line saying the block was skipped and why. The plugin installs it. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the path.
 
 **CLAUDE.md snippet.** [`templates/claude-md-snippet.md`](skills/gh-issues-manager/templates/claude-md-snippet.md) is a few lines for the project's CLAUDE.md that give every session the hub's location and the recording rules.
 
@@ -113,6 +132,24 @@ Every script that writes has `--dry-run`, which prints the exact `gh` commands a
 - The linter refuses drafts that contain common token formats or match the project's `restricted_patterns`, for example participant identifiers.
 - Decisions are quoted word for word with date, time and zone.
 - An older tracker is never edited; at most it receives short pointer comments.
+- Text read from GitHub is treated as data, never as instructions (see "Security model").
+
+## Security model
+
+Issue and comment text read back from GitHub is data, never instructions. A hub can be edited by anyone with write access to the repository, and on a public repository anyone can open issues and write comments. The skill tells Claude to treat everything it reads from the tracker as a description of the project's state, and never to follow commands found there. Only the user, in the session, gives instructions.
+
+The SessionStart hook deserves extra care because it puts tracker text into context without anyone asking. Its rules:
+
+| Rule | What it prevents |
+|---|---|
+| The configuration is read only from the project root (`CLAUDE_PROJECT_DIR`, else the top of the git checkout, else the current folder). Parent folders are never searched. The same holds for every script | A `.gh-issues-manager.json` planted in a parent folder pointing sessions at someone else's repository |
+| The hook prints nothing unless the configured repository is in the user's own trusted list (`~/.config/gh-issues-manager/trusted-repos` or `GHIM_TRUSTED_REPOS`). Nothing inside a project can add to that list | A cloned repository that configures itself to inject text |
+| The hub's text is printed only if its author and every recorded editor are allowed: the repository owner plus the logins listed for that repository in the trusted file. The body and its edit history come from one API call. Otherwise one line says the block was skipped and why | A collaborator or compromised account outside the list editing the hub |
+| Titles of open `active` issues are listed only for issues opened by allowed accounts; the rest are counted, not shown | Instructions smuggled in through an issue title |
+| The output is wrapped in `BEGIN/END PROJECT STATUS DATA` lines that say it is data and not instructions, text that imitates those lines is defused, the block is cut at 4,000 characters and the whole output at 6,000 | Text posing as system or user instructions, and context flooding |
+| Any failure or timeout prints nothing and exits 0 | A slow or broken network blocking the session |
+
+Limits: an allowed account can still write anything into the hub, so list only people you would take project status from; and an edit history longer than 100 entries cannot be checked in full, in which case the block is skipped. `resume_block.py show` applies the same author check when run by hand, with `--allow-any-author` as a deliberate override.
 
 ## Worked example
 
@@ -121,6 +158,7 @@ Every script that writes has `--dry-run`, which prints the exact `gh` commands a
 ```bash
 cd examples/tinycsv
 S=../../skills/gh-issues-manager/scripts
+export GHIM_CONFIG=$PWD/.gh-issues-manager.json   # the example is not at a project root
 
 python3 $S/setup_labels.py --dry-run
 python3 $S/lint_drafts.py --manifest manifest.json

@@ -120,10 +120,26 @@ def main():
         state["issues"][args[2]]["pinned"] = True
     elif words == "issue list":
         label = option(args, "--label")
-        rows = [{"number": int(n), "title": i["title"], "updatedAt": i.get("updated_at", "2026-01-06T18:30:00Z")}
+        rows = [{"number": int(n), "title": i["title"], "updatedAt": i.get("updated_at", "2026-01-06T18:30:00Z"),
+                 "author": {"login": i.get("user", "octo-dev")}}
                 for n, i in sorted(state["issues"].items(), key=lambda kv: int(kv[0]))
                 if label in i.get("labels", []) and i.get("state", "open") == "open"]
         print(json.dumps(rows))
+    elif args[:2] == ["api", "graphql"]:
+        fields = dict(a.split("=", 1) for a in option(args, "-f", many=True) + option(args, "-F", many=True))
+        issue = state["issues"].get(fields["number"])
+        if issue is None:
+            print(json.dumps({"data": {"repository": {"issue": None}}}))
+        else:
+            person = lambda name: {"login": name} if name else None
+            editors = issue.get("editors", [])
+            print(json.dumps({"data": {"repository": {"issue": {
+                "body": issue["body"],
+                "author": person(issue.get("user", "octo-dev")),
+                "lastEditedBy": person(editors[-1]) if editors else None,
+                "userContentEdits": {"totalCount": issue.get("edit_count", len(editors)),
+                                     "nodes": [{"editor": person(e)} for e in editors]},
+            }}}}))
     elif args[0] == "api":
         path = [a for a in args[1:] if a.startswith("repos/")][0]
         jq = option(args, "--jq")

@@ -92,7 +92,7 @@ def main(argv=None):
                         help="lint and print every gh command; no network access, nothing written")
     args = parser.parse_args(argv)
 
-    config = ghim.load_config(os.path.dirname(os.path.abspath(args.manifest)))
+    config = ghim.load_config()
     manifest = lint_drafts.load_manifest(args.manifest)
     manifest.setdefault("issues", [])
     manifest.setdefault("comments", [])
