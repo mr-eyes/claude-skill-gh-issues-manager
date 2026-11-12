@@ -219,7 +219,7 @@ tests/                    offline tests with a local stand-in for gh
 python3 -m unittest discover -s tests
 ```
 
-The tests never contact GitHub. In addition, the write paths were run end to end against a private repository with gh 2.97.0 on 2026-11-11: label setup and rerun, `create_issues.py` (4 issues, 2 comments, pin, read-back), a rerun with no duplicates, the refusal to overwrite a hub that had been changed on GitHub, `post_verified.py comment` with read-back, `show` and the hook with and without trust, and `snapshot.py`. All behaved as documented. That run predates the move of the resume block from the hub body to hub comments, which is covered by the offline tests and a read-only query against a public repository.
+The tests never contact GitHub.
 
 ## License
 
