@@ -12,10 +12,22 @@ type Repository {
 }
 
 type Issue {
+  comments( after: String before: String first: Int last: Int orderBy: IssueCommentOrder ): IssueCommentConnection!
+}
+
+type IssueCommentConnection {
+  nodes: [IssueComment]
+  totalCount: Int!
+}
+
+type IssueComment {
   author: Actor
   body: String!
+  createdAt: DateTime!
   editor: Actor
+  id: ID!
   lastEditedAt: DateTime
+  url: URI!
   userContentEdits( after: String before: String first: Int last: Int ): UserContentEditConnection
 }
 
