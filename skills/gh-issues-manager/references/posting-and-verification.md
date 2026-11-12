@@ -1,5 +1,7 @@
 # Posting and verification
 
+> Commands on this page write `scripts/<name>` for short. That is the `scripts` folder of this skill, next to `SKILL.md`; call it by its full path.
+
 Every post goes through the same five steps. The scripts do steps 3 to 5; steps 1 and 2 are yours.
 
 ## 1. Draft to a file

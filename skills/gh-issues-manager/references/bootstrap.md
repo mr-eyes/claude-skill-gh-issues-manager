@@ -1,6 +1,8 @@
 # Bootstrapping a new project
 
-Paths below are relative to the skill folder. The scripts read `.gh-issues-manager.json` from the project root only (`CLAUDE_PROJECT_DIR`, else the top of the git checkout, else the current folder).
+> Commands on this page write `scripts/<name>` for short. That is the `scripts` folder of this skill, next to `SKILL.md`; call it by its full path.
+
+The scripts read `.gh-issues-manager.json` from one place: the top of the git checkout that contains the current folder, or the current folder outside a checkout. Run them from inside the project and check the `config: ... repo: ...` line each prints first.
 
 ## 1. Agree on the frame with the owner
 
@@ -50,7 +52,7 @@ python3 scripts/create_issues.py --manifest .tmp/drafts/bootstrap/manifest.json 
 python3 scripts/create_issues.py --manifest .tmp/drafts/bootstrap/manifest.json
 ```
 
-The last command creates the issues, replaces every placeholder, pins the hub, reads each body back from the API and prints the key-to-number table. If it stops midway (network, rate limit), run the same command again: finished items are skipped, because progress is kept in `manifest.json.state.json`.
+The last command creates the issues, replaces every placeholder, pins the hub, reads each body back from the API and prints the key-to-number table. If it stops midway (network, rate limit), run the same command again: finished items are skipped, because progress is kept in `manifest.json.state.json` beside the manifest. Keep that file while the manifest is in use and keep it out of version control. A rerun adopts an issue or comment that an interrupted run already created, and never overwrites a body that someone changed on GitHub in the meantime.
 
 An issue whose draft contains placeholders is created with a one-line stub body and receives its full text seconds later, once all numbers are known.
 

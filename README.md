@@ -35,7 +35,7 @@ claude plugin marketplace add mr-eyes/claude-skill-gh-issues-manager
 claude plugin install gh-issues-manager@mr-eyes-skills
 ```
 
-The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's SessionStart hook is registered for every project but prints nothing until you trust a repository (next section).
+The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's SessionStart hook is registered for every project but prints nothing until you trust a repository (next section). The same trust list governs `resume_block.py show`.
 
 ### Trust the repositories whose hub the hook may print
 
@@ -104,7 +104,7 @@ The resume block is small on purpose (under 4,000 characters) and is rewritten a
 
 ## The optional hook and CLAUDE.md snippet
 
-**Hook.** `scripts/session_start_hook.sh` runs on the SessionStart event for the `startup`, `resume` and `compact` sources and prints the resume block plus the list of open active issues; Claude Code adds that output to the session context. It prints nothing when the project has no configuration file, when the repository is not in your trusted list, when `gh` is missing or offline, or when GitHub does not answer within 10 seconds. If the hub was written or edited by an account outside the allowed list, it prints one line saying the block was skipped and why. The plugin installs it. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the path.
+**Hook.** `scripts/session_start_hook.sh` runs on the SessionStart event for all five session sources (`startup`, `resume`, `clear`, `compact`, `fork`) and prints the resume block plus the numbers and labels of open active issues, followed by one line pointing to the skill's session protocol; Claude Code adds that output to the session context. It prints nothing when the project has no configuration file, when the repository is not in your trusted list, when `gh` is missing or offline, or when GitHub does not answer within 10 seconds. If the hub was written or edited by an account outside the allowed list, it prints one line saying the block was skipped and why. The plugin installs it. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the path.
 
 **CLAUDE.md snippet.** [`templates/claude-md-snippet.md`](skills/gh-issues-manager/templates/claude-md-snippet.md) is a few lines for the project's CLAUDE.md that give every session the hub's location and the recording rules.
 
@@ -116,9 +116,9 @@ All are in `skills/gh-issues-manager/scripts/`, use only the Python standard lib
 |---|---|---|
 | `setup_labels.py` | Creates the labels of the chosen profiles. Existing labels are left alone unless `--update` | yes |
 | `lint_drafts.py` | Checks drafts: required sections, leftover placeholders, bare `#N`, body length, Mermaid rules, secrets, project-defined restricted patterns | no |
-| `create_issues.py` | Creates interlinked issues and comments from a manifest, replaces `NEW-<key>` placeholders with real numbers, reads every body back, can be rerun after a failure | yes |
+| `create_issues.py` | Creates interlinked issues and comments from a manifest, replaces `NEW-<key>` placeholders with real numbers, reads every body and comment back, and can be rerun after a failure without duplicates or overwriting changed bodies | yes |
 | `post_verified.py` | Posts one comment or replaces one issue body, with lint, a backup of the replaced body and read-back | yes |
-| `resume_block.py` | Shows or updates the hub's resume block, touching nothing else in the hub | `update` only |
+| `resume_block.py` | Shows or updates the hub's resume block, touching nothing else in the hub. `show` reads only trusted repositories; `update` refuses if the hub changed while it was being prepared | `update` only |
 | `snapshot.py` | Saves all issues, pull requests and comments as local Markdown with an index, for offline reading and for surveying an old tracker | no |
 | `session_start_hook.sh` | The SessionStart hook | no |
 
@@ -128,7 +128,8 @@ Every script that writes has `--dry-run`, which prints the exact `gh` commands a
 
 - No script deletes an issue, a comment or a label, edits a posted comment, or closes an issue.
 - Only files named on the command line or in a manifest are posted. Nothing is posted by folder or wildcard.
-- Every write is read back from the API and compared with the draft.
+- Every issue body and comment that is written is read back from the API and compared with the draft. A pin is confirmed by asking GitHub whether the issue is pinned. Labels are not read back; rerunning `setup_labels.py` shows anything missing.
+- `create_issues.py` never overwrites a body that was changed on GitHub after it wrote it, and after an interrupted run it adopts what already exists instead of creating it twice.
 - The linter refuses drafts that contain common token formats or match the project's `restricted_patterns`, for example participant identifiers.
 - Decisions are quoted word for word with date, time and zone.
 - An older tracker is never edited; at most it receives short pointer comments.
@@ -142,14 +143,16 @@ The SessionStart hook deserves extra care because it puts tracker text into cont
 
 | Rule | What it prevents |
 |---|---|
-| The configuration is read only from the project root (`CLAUDE_PROJECT_DIR`, else the top of the git checkout, else the current folder). Parent folders are never searched. The same holds for every script | A `.gh-issues-manager.json` planted in a parent folder pointing sessions at someone else's repository |
-| The hook prints nothing unless the configured repository is in the user's own trusted list (`~/.config/gh-issues-manager/trusted-repos` or `GHIM_TRUSTED_REPOS`). Nothing inside a project can add to that list | A cloned repository that configures itself to inject text |
-| The hub's text is printed only if its author and every recorded editor are allowed: the repository owner plus the logins listed for that repository in the trusted file. The body and its edit history come from one API call. Otherwise one line says the block was skipped and why | A collaborator or compromised account outside the list editing the hub |
-| Titles of open `active` issues are listed only for issues opened by allowed accounts; the rest are counted, not shown | Instructions smuggled in through an issue title |
+| The configuration is read only from the project root: `CLAUDE_PROJECT_DIR` (which Claude Code sets for hooks), else the top of the git checkout, else the current folder. Parent folders are never searched. The same holds for every script, and each script prints the configuration file and repository it is using | A `.gh-issues-manager.json` planted in a parent folder pointing sessions at someone else's repository |
+| Trust is checked in every mode. The hook prints nothing, and `resume_block.py show` prints a one-line notice, unless the configured repository is in the user's own trusted list (`~/.config/gh-issues-manager/trusted-repos` or `GHIM_TRUSTED_REPOS`). Nothing inside a project can add to that list, and the repository owner counts as an allowed writer only once the repository is trusted | A cloned repository that configures itself to inject text |
+| The hub's text is printed only if its author, the account GitHub names as its current editor, and the editors of its newest 100 body edits are all allowed: the repository owner plus the logins listed for that repository in the trusted file. The body and its edit history come from one API call, and the newest edits are chosen by time. If the issue was edited but the history comes back empty or incomplete, the block is skipped. Otherwise one line says the block was skipped and why | An account outside the list editing the hub |
+| Issue titles are never printed. Open `active` issues are listed by number and labels, with a count | Instructions smuggled in through an issue title, which anyone who can edit the issue can change |
 | The output is wrapped in `BEGIN/END PROJECT STATUS DATA` lines that say it is data and not instructions, text that imitates those lines is defused, the block is cut at 4,000 characters and the whole output at 6,000 | Text posing as system or user instructions, and context flooding |
 | Any failure or timeout prints nothing and exits 0 | A slow or broken network blocking the session |
 
-Limits: an allowed account can still write anything into the hub, so list only people you would take project status from; and an edit history longer than 100 entries cannot be checked in full, in which case the block is skipped. `resume_block.py show` applies the same author check when run by hand, with `--allow-any-author` as a deliberate override.
+The trust boundary is write access to the repository. Anyone or anything that can edit issues there can change the hub: collaborators, GitHub Apps, Actions workflows, and tokens with `issues: write`. An allowed account can still write anything into the hub, so list only accounts you would take project status from; a bot that edits the hub must be listed too, or the block is skipped. Edits older than the newest 100 are not checked, which is acceptable because every resume update rewrites the whole block.
+
+`resume_block.py show` applies the same checks when run by hand. Its `--trust-once` and `--allow-any-author` flags are deliberate overrides for the user and are refused in hook mode.
 
 ## Worked example
 
@@ -168,9 +171,11 @@ python3 $S/create_issues.py --manifest manifest.json --dry-run
 The dry run prints what would happen, for example:
 
 ```text
+config: <path>/examples/tinycsv/.gh-issues-manager.json  repo: example-org/tinycsv
 manifest: manifest.json   repository: example-org/tinycsv   issues: 4   comments: 2
 lint: all 6 drafts pass
 dry run: no network access, nothing written
+note: commands are listed issue by issue. The real run creates all issues first, then writes the bodies, then posts the comments.
 would run: gh issue create --repo example-org/tinycsv --title 'tinycsv project hub' --body-file - --label hub   # body: a one-line stub, replaced in the next step
 would run: gh issue edit '<number of NEW-hub>' --repo example-org/tinycsv --body-file -   # hub.md, 4423 characters, with NEW-reader, NEW-speed, NEW-task-newlines replaced by real numbers
 would read back: gh api repos/example-org/tinycsv/issues/<number of NEW-hub> and compare with hub.md
@@ -187,7 +192,9 @@ In the drafts, issues refer to each other as `NEW-reader`, `NEW-speed` and so on
 **Last decisions:** 2026-03-04 15:55 PST, strict quoting is the default, see #2.
 ```
 
-To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json` to a scratch repository of your own.
+The dry run lists the commands issue by issue; the real run creates all issues first, then writes the bodies, then posts the comments.
+
+To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json` to a scratch repository of your own, run `setup_labels.py` and `create_issues.py` without `--dry-run`, and then set `hub` in `.gh-issues-manager.json` to the number the run printed for `NEW-hub`. The run leaves `manifest.json.state.json` beside the manifest; it is what makes a rerun safe, and this repository's `.gitignore` excludes it.
 
 ## Repository layout
 
@@ -211,3 +218,7 @@ python3 -m unittest discover -s tests
 ```
 
 The tests never contact GitHub.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

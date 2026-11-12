@@ -1,9 +1,9 @@
 {
-  "description": "Print the project hub's resume block into context at session start, on resume and after compaction. Silent unless the project has a .gh-issues-manager.json file.",
+  "description": "Print the project hub's resume block into context whenever a session starts, resumes, is cleared, compacted or forked. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository.",
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume|compact",
+        "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           {
             "type": "command",

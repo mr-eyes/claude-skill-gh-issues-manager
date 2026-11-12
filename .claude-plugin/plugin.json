@@ -6,6 +6,7 @@
     "name": "mr-eyes",
     "url": "https://github.com/mr-eyes"
   },
+  "license": "MIT",
   "repository": "https://github.com/mr-eyes/claude-skill-gh-issues-manager",
   "keywords": ["github", "issues", "project-management", "research", "manuscript"]
 }

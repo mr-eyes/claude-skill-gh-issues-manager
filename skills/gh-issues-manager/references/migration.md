@@ -1,5 +1,7 @@
 # Migrating from an older tracker
 
+> Commands on this page write `scripts/<name>` for short. That is the `scripts` folder of this skill, next to `SKILL.md`; call it by its full path.
+
 The goal is that the new tracker can be read without the old one. The old tracker stays exactly as it is, as provenance.
 
 ## Rules
