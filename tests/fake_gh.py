@@ -3,6 +3,10 @@
 
 It keeps a small repository in a JSON file (FAKE_GH_STATE) and answers the
 subset of gh commands the scripts use, in the formats the real gh prints.
+A comment's "edits" list follows GitHub: newest first, and for an edited
+comment it ends with an entry for the creation of the comment. A comment that
+was never edited has no "edits" (GitHub returns an empty history and a null
+lastEditedAt for it).
 Fault switches:
   FAKE_GH_FAIL_ON="issue edit"   exit 1 for commands starting with these words
   FAKE_GH_FAIL_AFTER="issue create"  do the work, then exit 1 (a timeout after GitHub acted)
@@ -160,7 +164,7 @@ def main():
 
             def comment_node(cid, comment, selection):
                 edits = comment.get("edits", [])
-                newest = max(edits, key=lambda e: e["at"]) if edits else None
+                newest = edits[0] if edits else None  # newest first, as GitHub lists them
                 values = {
                     "id": "IC_%s" % cid,
                     "url": "https://github.com/%s/issues/%s#issuecomment-%s" % (repo_of(fields), comment["issue"], cid),
