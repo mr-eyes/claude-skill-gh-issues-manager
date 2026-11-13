@@ -187,18 +187,22 @@ def main():
             print(json.dumps({"errors": [{"message": m} for m in problems]}))
             fail("gh: " + problems[0])
         if "number" not in fields:  # issues named in the query by aliases, for their body edits
-            out = {}
+            out, errors = {}, []
             for alias, name, arguments, children in graphql_check.parse_query(fields["query"])[0][3]:
                 issue = state["issues"].get(arguments.get("number"))
-                if issue is None:
-                    out[alias] = None
+                if issue is None or (name == "issue" and issue.get("pull_request")):
+                    out[alias] = None  # GitHub: "Could not resolve to an Issue with the number of N."
+                    errors.append({"type": "NOT_FOUND", "path": ["repository", alias], "message":
+                                   "Could not resolve to an Issue with the number of %s." % arguments.get("number")})
                     continue
                 edits = issue.get("edits", [])
                 out[alias] = {"lastEditedAt": issue.get("last_edited_at"),
                               "userContentEdits": {"totalCount": len(edits), "nodes": [
                                   {"editedAt": e["at"], "editor": {"login": e["by"]}} for e in edits]}}
-            print(json.dumps({"data": {"repository": out}}))
+            print(json.dumps(dict({"data": {"repository": out}}, **({"errors": errors} if errors else {}))))
             save(state)
+            if errors:
+                fail("gh: " + errors[0]["message"])
             return
         issue = state["issues"].get(fields["number"])
         if issue is None:

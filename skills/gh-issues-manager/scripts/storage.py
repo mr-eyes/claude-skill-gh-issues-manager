@@ -75,25 +75,43 @@ def check_top(path, create=True, tighten=True):
 
     With tighten=False (for --doctor) a loose top folder owned by the user is accepted as it is and left unchanged.
     """
+    parent = os.path.dirname(os.path.abspath(path))
+    try:
+        above = os.stat(parent)
+        if above.st_mode & stat.S_IWOTH and not above.st_mode & stat.S_ISVTX:
+            raise StorageError("%s is in %s, which anyone can write to without the sticky bit" % (path, parent))
+    except FileNotFoundError:
+        pass
     if not os.path.lexists(path):
         if not create:
             return False
         os.makedirs(path, mode=0o700, exist_ok=True)
-        os.chmod(path, 0o700)
-    info = os.lstat(path)
-    if stat.S_ISLNK(info.st_mode):
-        raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path)
-    if not stat.S_ISDIR(info.st_mode):
-        raise StorageError("%s is not a folder" % path)
-    uid = _uid()
-    if uid is None or info.st_uid == uid:
-        if info.st_mode & 0o077 and tighten:
-            os.chmod(path, 0o700)  # created with a loose umask; the user owns it, so tighten it
-    elif info.st_uid == 0:
-        if info.st_mode & 0o022:
-            raise StorageError("%s is owned by root and writable by others" % path)
-    else:
-        raise StorageError("%s is owned by another user" % path)
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        if os.path.islink(path):
+            raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path)
+        raise StorageError("%s is not a folder the plugin can open" % path)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISDIR(info.st_mode):
+            raise StorageError("%s is not a folder" % path)
+        uid = _uid()
+        if uid is None or info.st_uid == uid:
+            if info.st_mode & 0o077 and tighten:
+                # created with a loose umask; the user owns it, so tighten it, through the open descriptor
+                if hasattr(os, "fchmod"):
+                    os.fchmod(descriptor, 0o700)
+                else:
+                    os.chmod(path, 0o700)
+        elif info.st_uid == 0:
+            if info.st_mode & 0o022:
+                raise StorageError("%s is owned by root and writable by others" % path)
+        else:
+            raise StorageError("%s is owned by another user" % path)
+    finally:
+        os.close(descriptor)
     return True
 
 
@@ -175,12 +193,35 @@ def user_key(create=True, tighten=True):
         raise StorageError("no key yet at %s" % key_path())
     path = os.path.join(private, KEY_NAME)
     text = read_file(path)
-    if not text or len(text.strip()) < 32:
+    if text is None:
         if not create:
             raise StorageError("no key yet at %s" % path)
-        write_file(path, os.urandom(32).hex() + "\n")
+        try:  # exclusive creation: of two first uses at the same moment, one writes and both read the same key
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        except FileExistsError:
+            pass
+        else:
+            with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+                handle.write(os.urandom(32).hex() + "\n")
         text = read_file(path)
-    return text.strip().encode("ascii")
+    key = (text or "").strip()
+    if len(key) < 32 or not all(c in "0123456789abcdef" for c in key):
+        raise StorageError("the key at %s is damaged; the plugin does not replace it on its own. Move it away by "
+                           "hand, and the indexes made with it will be rebuilt" % path)
+    return key.encode("ascii")
+
+
+def same_file(path, before):
+    """True when `path` is still the regular file (device and inode) that `before` describes."""
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    return stat.S_ISREG(now.st_mode) and (now.st_dev, now.st_ino) == (before.st_dev, before.st_ino)
+
+
+def lstat_file(path):
+    return os.lstat(path)
 
 
 def mark(path, repo, create=True, tighten=True):

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Compile the deliverable and the dated history of the project from the record.
 
-Read-only on GitHub. It first syncs the local index (index.py) unless
---no-sync is given, then writes, under --out:
+Read-only on GitHub. It first rebuilds the local index from GitHub (index.py
+sync --rebuild), so that issues and comments deleted on GitHub are not
+compiled; --incremental syncs only what changed (an incremental sync does not
+see deletions) and --no-sync uses the index as it is. Then it writes, under --out:
 
   deliverable/NN-<label>.md   for each deliverable section, in the hub's order,
                               the text under that section's heading in every
@@ -175,6 +177,8 @@ def main(argv=None):
     parser.add_argument("--out", required=True, help="folder for the compiled files")
     parser.add_argument("--ref", help="git ref of the project the compilation belongs to, recorded in MANIFEST.json")
     parser.add_argument("--no-sync", action="store_true", help="use the index as it is, without reading GitHub")
+    parser.add_argument("--incremental", action="store_true",
+                        help="sync only what changed instead of rebuilding; deletions on GitHub are then not seen")
     parser.add_argument("--dry-run", action="store_true",
                         help="list what would be read and written; read nothing from GitHub, write nothing")
     args = parser.parse_args(argv)
@@ -185,8 +189,9 @@ def main(argv=None):
     print(ghim.describe(config, repo))
     if args.dry_run:
         if not args.no_sync:
-            print("would read (index.py sync): gh api --paginate repos/%s/issues?state=all, "
-                  "repos/%s/issues/comments, the timeline of each changed issue, and their body edits" % (repo, repo))
+            print("would read (index.py sync%s): gh api --paginate repos/%s/issues?state=all, "
+                  "repos/%s/issues/comments, the timeline of each changed issue, and their body edits"
+                  % ("" if args.incremental else " --rebuild", repo, repo))
         db = index.connect(repo, create=False)
         if db is None:
             print("would write: %s/deliverable/<NN>-<label>.md per section, figures.tsv, tables.tsv, sources.tsv, "
@@ -198,7 +203,7 @@ def main(argv=None):
             print("would write: %s" % name)
         return 0
     if not args.no_sync:
-        summary = index.sync(repo, hub)
+        summary = index.sync(repo, hub, rebuild=not args.incremental)
         print("synced: %d issues, %d comments, %d timelines changed" % (summary["issues"], summary["comments"],
                                                                          summary["timelines"]))
     db = index.connect(repo, create=False)

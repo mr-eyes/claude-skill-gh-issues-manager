@@ -67,11 +67,13 @@ def parse_event(body):
         out.update(type=match.group(1).lower(), heading_time=match.group(3), title=match.group(4),
                    reconstructed=bool(match.group(2)))
     if marker:
-        if marker.get("type") in EVENT_TYPES and (out["type"] == "other" or out["type"] == marker.get("type")):
-            out["type"] = marker["type"]
+        # The marker types a comment only together with a matching heading; a marker alone leaves it "other".
+        if out["type"] != "other" and out["type"] != marker.get("type"):
+            out["type"] = "other"
         out["at"] = marker.get("at") if re.fullmatch(ISO, marker.get("at", "")) else None
-        out["recorded"] = marker.get("recorded")
-        out["reconstructed"] = out["reconstructed"] or "recorded" in marker
+        recorded = marker.get("recorded", "")
+        out["recorded"] = recorded if re.fullmatch(ISO, recorded) else None
+        out["reconstructed"] = out["reconstructed"] or out["recorded"] is not None
     if out["type"] == "other":
         out["title"] = re.sub(r"^#+\s*", "", heading_line)[:120]
     return out
