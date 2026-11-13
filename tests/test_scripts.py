@@ -710,6 +710,23 @@ class CreateIssuesTests(Sandbox):
         bodies = [c["body"] for c in self.repo()["comments"].values()]
         self.assertTrue(any("copied to example-org/tinycsv#5 on" in b for b in bodies))
 
+    def test_a_comment_for_a_malformed_repository_stops_before_any_gh_call(self):
+        self.add_labels()
+        self.edit_manifest(lambda m: m["comments"].append({"issue": 1, "repo": "../x", "kind": "pointer",
+                                                           "body_file": "pointer-1.md"}))
+        with open(os.path.join(self.drafts, "pointer-1.md"), "w") as handle:
+            handle.write("The content of this item was copied to NEW-reader on 2026-03-05.\n")
+        data = self.repo()
+        data["log"] = []
+        with open(self.state, "w") as handle:
+            json.dump(data, handle)
+        for extra in (["--dry-run"], []):
+            result = self.run_script("create_issues.py", "--manifest", self.manifest, *extra)
+            self.assertNotEqual(0, result.returncode, extra)
+            self.assertIn("comment 4: 'repo' must be owner/name", result.stderr)
+            self.assertNotIn("would run", result.stdout)
+            self.assertEqual([], self.repo()["log"], extra)
+
 
 class PostVerifiedTests(Sandbox):
     def test_comment_dry_run_offline(self):
@@ -1541,7 +1558,8 @@ class RecordSandbox(Sandbox):
         for key in removed:
             os.environ.pop(key, None)
         os.environ.update(environment)
-        folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
+        import storage as storage_module
+        folder = storage_module.folder(storage_module.cache_top(), "example-org__tinycsv")
         return os.path.join(folder, "sync.lock")
 
     def query(self, *args):
@@ -2098,6 +2116,160 @@ class GuardTests(RecordSandbox):
         self.frame_ok(cached)
         self.assertIn("index synced at an unknown time UTC", cached)
         self.assertIn("Hub: #4 tinycsv project hub \n", cached)
+
+    def test_numbers_and_times_take_ascii_digits_only(self):
+        import sqlite3
+        import brief as brief_module
+        import compile as compile_module
+        import index as index_module
+        import record_format
+        arabic = str.maketrans("0123456789", "".join(chr(0x660 + d) for d in range(10)))  # Arabic-Indic digits
+        db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
+        db.row_factory = sqlite3.Row
+        db.executescript(index_module.SCHEMA)
+
+        def comment_issue(url):
+            index_module.store_comment_page(db, [{"id": 1, "issue_url": url, "created_at": "2026-03-05T17:00:00Z"}],
+                                            set())
+            row = db.execute("SELECT issue FROM comments WHERE id = 1").fetchone()
+            db.execute("DELETE FROM comments")
+            return row["issue"] if row else None
+
+        def hub_table_first(cell):
+            db.execute("DELETE FROM issues")
+            db.execute("DELETE FROM labels")
+            db.execute("INSERT INTO issues(number, body) VALUES (4, ?)",
+                       ("## Deliverable sections\n\n| Section | Issue |\n|---|---|\n| Known issues | %s |\n" % cell,))
+            db.executemany("INSERT INTO labels VALUES (?, ?)", [(12, "final-record"), (12, "rel:known-issues"),
+                                                               (13, "final-record"), (13, "rel:changed")])
+            return compile_module.hub_order(db, 4, ["software"])[0][0]  # the table puts Known issues first
+
+        def stored_since(stamp):
+            index_module.set_meta(db, "issues_newest", stamp)
+            return index_module.since_value(db, "issues_newest")
+
+        event = "<!-- ghim:event type=failure at=%s -->\n### Failure: 2026-03-05 09:00 PST - out of memory\n"
+        cases = [  # (what, function, text with ASCII digits, its value, the value with Arabic-Indic digits)
+            ("ISO_UTC", lambda t: index_module.newest_of(None, t), "2026-03-05T17:00:00Z", "2026-03-05T17:00:00Z", None),
+            ("ISO_UTC since", stored_since, "2026-03-05T17:00:00Z", "2026-03-05T17:00:00Z", None),
+            ("ISO", lambda t: bool(re.fullmatch(record_format.ISO, t)), "2026-03-05T09:00-08:00", True, False),
+            ("event marker", lambda t: record_format.parse_event(event % t)["at"], "2026-03-05T09:00-08:00",
+             "2026-03-05T09:00-08:00", None),
+            ("STAMP", lambda t: bool(re.fullmatch(record_format.STAMP, t)), "2026-03-05 09:00 PST", True, False),
+            ("lint STAMP", lambda t: bool(re.fullmatch(lint_drafts.STAMP, t)), "2026-03-05 09:00 UTC+1", True, False),
+            ("heading time", index_module.to_iso, "2026-03-05 09:00 UTC", "2026-03-05T09:00Z", None),
+            ("MENTION", lambda t: [m[0] for m in record_format.MENTION.findall(t)], "see #12", ["12"], []),
+            ("PULL", lambda t: record_format.PULL.findall(t), "pull request #12, /pull/13", [("12", ""), ("", "13")], []),
+            ("issue_url", comment_issue, "https://api.github.com/repos/example-org/tinycsv/issues/12", 12, None),
+            ("hub table", hub_table_first, "#12", "rel:known-issues", "rel:changed"),
+        ]
+        for what, function, text, ascii_value, other in cases:
+            self.assertEqual(ascii_value, function(text), what)
+            self.assertEqual(other, function(text.translate(arabic)), what)
+        late = "2026-03-05T17:00:00Z\n"  # a final newline
+        self.assertIsNone(index_module.newest_of(None, late))
+        self.assertIsNone(stored_since(late))
+        index_module.set_meta(db, "synced_at", late)
+        self.assertIsNone(brief_module.Record(db, {"hub": 4}, REPO).synced)
+        # an event marker with such a time is indexed with the time of its heading, not the marker's
+        db.execute("INSERT INTO issues(number, body, labels) VALUES (6, '', '[]')")
+        db.execute("INSERT INTO comments(id, issue, body, created_at) VALUES (7, 6, ?, '2026-03-06T00:00:00Z')",
+                   (event % "2026-03-05T09:00-08:00".translate(arabic),))
+        index_module.derive(db)
+        self.assertEqual(("failure", "2026-03-05T09:00"), tuple(db.execute("SELECT type, at FROM events").fetchone()))
+        self.ready()
+        self.meta(synced_at=late)
+        self.assertIn("synced: unknown (", self.tool("index.py", "status").stdout)
+
+    def test_the_link_and_time_of_a_resume_comment_are_shown_only_in_ascii(self):
+        import contextlib
+        import io
+        import sqlite3
+        import brief as brief_module
+        import index as index_module
+        import resume_block
+        self.in_process({"CLAUDE_PROJECT_DIR": self.project})
+        body = "### Resume block: 2026-03-04 16:40 PST\n\n%s\n**Current focus:** Release 0.3.0\n%s\n" % (
+            ghim.RESUME_START, ghim.RESUME_END)
+        good = {"url": "https://github.com/example-org/tinycsv/issues/4#issuecomment-9100",
+                "created": "2026-03-05T00:40:00Z"}
+        bad = {"url": "https://github.com/example-оrg/tinycsv/issues/4#issuecomment-9100",
+               "created": "٢٠٢٦-03-05T00:40:00Z"}
+        real = ghim.read_hub_comments
+        try:
+            for fields, shown in ((good, True), (bad, False)):
+                comment = dict(fields, body=body, author="octo-dev", last_edited=None, editor=None, edit_total=0,
+                               edit_editors=[])
+                ghim.read_hub_comments = lambda *args, **kw: [dict(comment)]
+                db = sqlite3.connect(":memory:")
+                self.addCleanup(db.close)
+                db.row_factory = sqlite3.Row
+                db.executescript(index_module.SCHEMA)
+                index_module.read_resume(db, REPO, 4, 5)
+                printed = io.StringIO()
+                with contextlib.redirect_stdout(printed):
+                    self.assertEqual(0, resume_block.main(["show", "--repo", REPO, "--hub", "4"]))
+                for text in (index_module.get_meta(db, "resume_note"), printed.getvalue()):
+                    self.assertIn("never edited", text)
+                    self.assertEqual(shown, fields["url"] in text, text)
+                    self.assertEqual(shown, fields["created"] in text, text)
+        finally:
+            ghim.read_hub_comments = real
+        self.assertTrue(brief_module.URL.fullmatch("https://github.com/example-org/tinycsv/issues/12"))
+        for url in ("https://github.com/example-оrg/tinycsv/issues/12",
+                    "https://github.com/example-org/tinycsv/issues/١٢"):
+            self.assertIsNone(brief_module.URL.fullmatch(url))
+
+    def test_repository_names_take_githubs_form(self):
+        kelvin = "example-org/tinyKsv"  # the Kelvin sign: its lowercase is an ASCII k
+        refused = ["example-оrg/tinycsv", kelvin, "../user", "a/..", "a/.", "-x/y", ".x/y", "a" * 40 + "/tinycsv",
+                   "example-org/" + "a" * 101, "example-org/release١٢", "example-org/tinycsv\n", "example-org"]
+        accepted = ["example-org/.github", "Example-Org/tiny_csv.v2", "a" * 39 + "/x", "x/" + "a" * 100,
+                    "example_org/tinycsv"]
+        listed = [n for n in refused + accepted if not re.search(r"\s", n)]
+        trusted_file = self.write("trusted-all", "".join("%s octo-dev\n" % n for n in listed))
+        self.in_process({"GHIM_TRUSTED_FILE": trusted_file, "GHIM_TRUSTED_REPOS": ",".join(listed)})
+        self.assertEqual({n.lower() for n in accepted}, set(ghim.trusted_repos()))
+        with open(self.trusted, "w") as handle:  # the hooks' list: every name, and the ASCII form of the Kelvin one
+            handle.write("".join("%s octo-dev\n" % n for n in listed + ["example-org/tinyksv"]))
+
+        def answers(repo):
+            return self.write("answers.json", json.dumps({"repo": repo, "deliverables": [{"kind": "software"}],
+                                                          "decision_makers": ["Sam Rivera"], "timezone": "UTC"}))
+
+        def apply(repo, existing=None):
+            root = tempfile.mkdtemp(dir=self.dir)
+            if existing is not None:
+                with open(os.path.join(root, ghim.CONFIG_NAME), "w") as handle:
+                    json.dump({"repo": existing}, handle)
+            return self.tool("setup.py", "apply", "--answers", answers(repo), "--root", root, "--dry-run", gh="false")
+
+        for name in refused:
+            self.assertFalse(ghim.valid_repo(name), ascii(name))
+            for args in ((name, {}), (None, {"repo": name})):
+                with self.assertRaises(SystemExit, msg=ascii(name)):
+                    ghim.resolve_repo(*args)
+            self.write_config({"repo": name, "hub": 4})
+            session = self.hook("session-start")
+            self.assertEqual((0, ""), (session.returncode, session.stdout), ascii(name))
+            self.assertIn("the hooks stay silent because \"repo\" or \"hub\" is missing or malformed",
+                          self.tool("hooks.py", "--doctor", gh="false").stdout, ascii(name))
+            refused_answers = apply(name)
+            self.assertNotEqual(0, refused_answers.returncode, ascii(name))
+            self.assertIn("error: repo must be owner/name", refused_answers.stderr, ascii(name))
+            lowered = name.lower() if ghim.valid_repo(name.lower()) else REPO
+            merged = apply(lowered, existing=name)  # an existing setup that names it
+            self.assertNotEqual(0, merged.returncode, ascii(name))
+            if lowered != REPO:
+                self.assertIn("has values that do not fit: repo", merged.stderr, ascii(name))
+            caught = self.tool("catchup.py", "--repo=" + name, "gap", "--offline", gh="false")
+            self.assertIn("error: --repo must be owner/name", caught.stderr, ascii(name))
+        for name in accepted:
+            self.assertTrue(ghim.valid_repo(name), name)
+            self.assertEqual(name, ghim.resolve_repo(name, {}))
+            result = apply(name)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_the_hook_budget_is_only_ever_a_number(self):
         self.ready()
