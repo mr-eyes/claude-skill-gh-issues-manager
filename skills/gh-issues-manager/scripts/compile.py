@@ -80,7 +80,7 @@ def hub_order(db, hub, profiles):
         cells = [c.strip() for c in line.strip().strip("|").split("|")] if line.strip().startswith("|") else []
         if len(cells) < 2:
             continue
-        found = re.search(r"#(\d+)", cells[1])
+        found = re.search(r"#([0-9]+)", cells[1])
         candidates = by_heading.get(cells[0].lower(), [])
         if not found or not candidates:
             continue

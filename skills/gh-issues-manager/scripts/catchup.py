@@ -306,7 +306,7 @@ def main(argv=None):
     config = ghim.load_config()
     root = os.path.abspath(args.root or ghim.project_root())
     repo = args.repo or config.get("repo")
-    if repo and not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+    if repo and not ghim.valid_repo(repo):
         sys.exit("error: --repo must be owner/name")
     if args.command == "inventory":
         data = inventory(root, repo, args.offline, args.transcripts)

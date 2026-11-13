@@ -119,7 +119,7 @@ def configured():
     """(config, repo, hub) when the project is set up and trusted, else None."""
     config = ghim.load_config()
     repo, hub = config.get("repo"), config.get("hub")
-    if not isinstance(repo, str) or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or isinstance(hub, bool) or \
+    if not ghim.valid_repo(repo) or isinstance(hub, bool) or \
             not isinstance(hub, int) or hub < 1:
         return None
     if repo.lower() not in ghim.trusted_repos():
@@ -441,7 +441,7 @@ def doctor():
     if not config.get("_path"):
         print("result: the hooks stay silent in this project because it is not set up")
         return 1
-    if not (isinstance(repo, str) and "/" in repo and isinstance(hub, int)):
+    if not (ghim.valid_repo(repo) and isinstance(hub, int)):
         print("result: the hooks stay silent because \"repo\" or \"hub\" is missing or malformed")
         return 1
     trusted = repo.lower() in ghim.trusted_repos()

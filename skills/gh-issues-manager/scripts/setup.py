@@ -205,8 +205,8 @@ def check_answers(answers):
         raise AnswerError("the answers must be a JSON object")
     out = {}
     repo = answers.get("repo")
-    if not isinstance(repo, str) or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
-        raise AnswerError("repo must be owner/name")
+    if not ghim.valid_repo(repo):
+        raise AnswerError("repo must be owner/name in GitHub's form")
     out["repo"] = repo
     record = answers.get("record", "this")
     if record not in ("this", "other", "new"):
@@ -339,8 +339,7 @@ def merge_profiles(existing, new):
 def check_existing(existing):
     """The values of an existing setup that setup.py merges and prints must fit the same patterns as the answers."""
     problems = []
-    if "repo" in existing and not (isinstance(existing["repo"], str) and re.fullmatch(r"[\w.-]+/[\w.-]+",
-                                                                                     existing["repo"])):
+    if "repo" in existing and not ghim.valid_repo(existing["repo"]):
         problems.append("repo")
     if "hub" in existing and not (isinstance(existing["hub"], int) and not isinstance(existing["hub"], bool) and
                                   existing["hub"] > 0):

@@ -58,7 +58,7 @@ import storage  # noqa: E402
 
 FORMAT = "2"
 OVERLAP = 60  # seconds read again at each incremental sync, so items stamped in the same second are not missed
-ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+ISO_UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")  # used with fullmatch
 IDENTITY = ("repo", "format", "mark")
 BACKGROUND_DEFAULT = 300   # seconds a background sync may run
 BACKGROUND_RANGE = (30, 3600)
@@ -198,7 +198,7 @@ def connect(repo, create=True, tighten=True):
 def since_value(db, key):
     """A stored "since" time, used in an API query only when it is a plain ISO 8601 UTC time."""
     value = get_meta(db, key)
-    return value if value and ISO_UTC.match(value) else None
+    return value if value and ISO_UTC.fullmatch(value) else None
 
 
 def get_meta(db, key, default=None):
@@ -269,7 +269,7 @@ def store_issue_page(db, rows, changed):
 
 def store_comment_page(db, rows, changed):
     for row in rows:
-        match = re.search(r"/issues/(\d+)$", row.get("issue_url", ""))
+        match = re.search(r"/issues/([0-9]+)$", row.get("issue_url", ""))
         if not match:
             continue
         updated = row.get("updated_at") or row.get("created_at")
@@ -320,7 +320,7 @@ def pages(call, query, since):
 
 
 def newest_of(current, stamp):
-    if stamp and ISO_UTC.match(stamp) and (not current or stamp > current):
+    if stamp and ISO_UTC.fullmatch(stamp) and (not current or stamp > current):
         return stamp
     return current
 
@@ -837,8 +837,8 @@ def read_resume(db, repo, hub, timeout):
             set_meta(db, "resume_note", "hub %s has no resume comment among its newest %d comments. Post one with "
                      "resume_block.py update" % (where, ghim.COMMENTS_READ))
         return
-    url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"]) else "(link not shown)"
-    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"]) else "unknown"
+    url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) else "(link not shown)"
+    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
     # Only a block that passed the trust, author and never-edited checks just now is kept.
     set_meta(db, "resume", ghim.extract_resume_block(chosen["body"]).strip())
     set_meta(db, "resume_read_at", now_utc())
@@ -920,7 +920,7 @@ def to_iso(stamp):
     """'2026-03-04 14:10 UTC' to ISO; other zones are kept as local date and time without offset."""
     if not stamp:
         return None
-    match = re.match(r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})", stamp)
+    match = re.match(r"([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2})", stamp)
     if not match:
         return None
     return "%sT%s%s" % (match.group(1), match.group(2), "Z" if stamp.endswith("UTC") else "")
@@ -1147,7 +1147,7 @@ def main(argv=None):
     if args.command == "status":
         print("index: %s" % index_path(repo))
         synced = get_meta(db, "synced_at")
-        print("synced: %s (%s)%s" % (synced if synced and ISO_UTC.match(synced) else "unknown", age_text(synced),
+        print("synced: %s (%s)%s" % (synced if synced and ISO_UTC.fullmatch(synced) else "unknown", age_text(synced),
                                       "" if get_meta(db, "sync_complete") != "0" else ", incomplete"))
         print(", ".join("%s %d" % item for item in describe_index(db).items()))
         return 0

@@ -131,14 +131,14 @@ def trusted_repos():
         with open(trusted_file(), encoding="utf-8") as handle:
             for line in handle:
                 parts = line.split("#", 1)[0].split()
-                if parts and re.fullmatch(r"[\w.-]+/[\w.-]+", parts[0]):
+                if parts and valid_repo(parts[0]):
                     trusted.setdefault(parts[0].lower(), set()).update(p.lower() for p in parts[1:])
     except OSError:
         pass
     for name in os.environ.get("GHIM_TRUSTED_REPOS", "").split(","):
-        name = name.strip().lower()
-        if re.fullmatch(r"[\w.-]+/[\w.-]+", name):
-            trusted.setdefault(name, set())
+        name = name.strip()
+        if valid_repo(name):  # checked before lowercase, which turns the Kelvin sign into k
+            trusted.setdefault(name.lower(), set())
     return trusted
 
 
@@ -260,7 +260,7 @@ def describe(config, repo):
 
 def resolve_repo(cli_value, cfg):
     repo = cli_value or cfg.get("repo")
-    if not repo or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+    if not valid_repo(repo):
         sys.exit(
             "error: no repository. Pass --repo owner/name or set \"repo\" in %s"
             % CONFIG_NAME
@@ -351,8 +351,16 @@ def load_profile(name, shipped_only=False):
 
 
 LABEL_NAME = re.compile(r"[a-z0-9][a-z0-9:._-]{0,49}")
+# GitHub's form of owner/name: the owner is 1 to 39 ASCII letters, digits, - or _ (managed accounts have _),
+# starting with a letter or digit; the name is 1 to 100 of those and ., and not . or ..
+REPO_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,38}/(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}")
 HEADING_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,.'()-]{0,59}")
 PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+
+
+def valid_repo(value):
+    """True when `value` is a repository name in GitHub's form, owner/name in ASCII; see REPO_NAME."""
+    return isinstance(value, str) and REPO_NAME.fullmatch(value) is not None
 
 
 RESERVED_PREFIXES = {"topic", "type"}

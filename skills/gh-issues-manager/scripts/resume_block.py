@@ -68,8 +68,8 @@ def show(args, config):
                   "Post one with resume_block.py update." % (where, ghim.COMMENTS_READ))
         return 0
 
-    url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"]) else "(not shown)"
-    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"]) else "unknown"
+    url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) else "(not shown)"
+    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
     lines = [
         BEGIN,
         "Source: newest usable resume comment on hub issue %s, %s" % (where, url),

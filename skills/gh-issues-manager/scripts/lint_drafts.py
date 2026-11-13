@@ -145,7 +145,7 @@ KINDS = {
 }
 
 # Date, time and zone, for example "2026-03-04 14:10 PST" or "2026-03-04 14:10 UTC+1".
-STAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:[A-Z]{2,5}|UTC[+-]\d{1,2}(?::\d{2})?)\b"
+STAMP = r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} (?:[A-Z]{2,5}|UTC[+-][0-9]{1,2}(?::[0-9]{2})?)\b"
 
 SECRET_PATTERNS = [
     ("GitHub token", r"\bgh[pousr]_[A-Za-z0-9]{30,}"),
@@ -668,6 +668,8 @@ def load_manifest(path):
                 problems.append("comment %d targets %r, which is not NEW-<key> of this manifest" % (index + 1, target))
         elif not isinstance(target, int):
             problems.append("comment %d: 'issue' must be a number or NEW-<key>" % (index + 1))
+        if "repo" in item and not ghim.valid_repo(item["repo"]):
+            problems.append("comment %d: 'repo' must be owner/name in GitHub's form" % (index + 1))
     for item in issues:
         for label in item.get("labels") or []:
             if "," in str(label):

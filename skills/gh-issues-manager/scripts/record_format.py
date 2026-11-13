@@ -11,8 +11,8 @@ import ghim
 
 EVENT_TYPES = ("result", "decision", "failure", "checkpoint", "correction", "record", "triage")
 HEADED_TYPES = ("result", "decision", "failure", "checkpoint", "correction")
-ISO = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})"
-STAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:[A-Z]{2,5}|UTC[+-]\d{1,2}(?::\d{2})?)\b"
+ISO = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?(?:Z|[+-][0-9]{2}:[0-9]{2})"
+STAMP = r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2} (?:[A-Z]{2,5}|UTC[+-][0-9]{1,2}(?::[0-9]{2})?)\b"
 MARKER = re.compile(r"^<!-- ghim:event ((?:[a-z]+=\S+ )*[a-z]+=\S+) -->\s*$")
 EVENT_HEADING = re.compile(r"^### (Result|Decision|Failure|Checkpoint|Correction|Triage)( \(reconstructed\))?: (%s) - (.+?)\s*$"
                            % STAMP)
@@ -22,9 +22,9 @@ LINK = re.compile(r"\]\((https://github\.com/([\w.-]+/[\w.-]+)/blob/([^/\s]+)/([
 BRANCH_REFS = {"main", "master", "head", "develop", "dev", "trunk"}
 CODE_SPAN = re.compile(r"`([^`\n]+)`")
 COMMIT = re.compile(r"(?<![\w/.-])(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}(?![\w-])")
-PULL = re.compile(r"(?:\bpull request\s+#(\d+)|/pull/(\d+))", re.I)
+PULL = re.compile(r"(?:\bpull request\s+#([0-9]+)|/pull/([0-9]+))", re.I)
 URL = re.compile(r"https?://[^\s)>|`]+")
-MENTION = re.compile(r"(?<![\w/&#])#(\d{1,5})\b(?:\s*\(([^)\n]{1,60})\))?")
+MENTION = re.compile(r"(?<![\w/&#])#([0-9]{1,5})\b(?:\s*\(([^)\n]{1,60})\))?")
 STOP = {"of", "the", "a", "an", "such", "that", "which", "in", "on", "for", "and", "or", "to", "with", "by", "at",
         "all", "each", "are", "is", "were", "was", "be", "its", "their", "this", "these", "those"}
 NUMBER = re.compile(r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)\s+of\s+(?:the\s+)?(\d[\d,]*)\b((?:[ \t]+[A-Za-z][\w-]*){0,6})")
