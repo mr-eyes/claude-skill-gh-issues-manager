@@ -1,0 +1,48 @@
+{
+  "name": "proposal",
+  "deliverable": "A grant or project proposal.",
+  "prefix": "gp",
+  "events": [
+    "preliminary result that enters the proposal",
+    "decision on aims or scope",
+    "reviewer comment and its answer",
+    "submission or resubmission"
+  ],
+  "labels": [
+    {
+      "name": "gp:aims",
+      "color": "1d76db",
+      "description": "Issue body is proposal text for: aims",
+      "heading": "Aims"
+    },
+    {
+      "name": "gp:significance",
+      "color": "1d76db",
+      "description": "Issue body is proposal text for: significance",
+      "heading": "Significance"
+    },
+    {
+      "name": "gp:approach",
+      "color": "1d76db",
+      "description": "Issue body is proposal text for: approach",
+      "heading": "Approach"
+    },
+    {
+      "name": "gp:timeline",
+      "color": "1d76db",
+      "description": "Issue body is proposal text for: timeline and milestones",
+      "heading": "Timeline"
+    },
+    {
+      "name": "gp:resources",
+      "color": "1d76db",
+      "description": "Issue body is proposal text for: resources and budget",
+      "heading": "Resources"
+    },
+    {
+      "name": "type:reviewer-comment",
+      "color": "c2e0c6",
+      "description": "A comment from a reviewer or co-author to answer"
+    }
+  ]
+}

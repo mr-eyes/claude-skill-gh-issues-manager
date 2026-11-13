@@ -1,6 +1,7 @@
 {
   "name": "manuscript",
   "deliverable": "A paper: main text, figures, tables and supplement.",
+  "prefix": "ms",
   "events": [
     "result that enters a figure, table or sentence",
     "decision on a claim, analysis or wording",
@@ -38,6 +39,11 @@
       "color": "1d76db",
       "description": "Issue body is manuscript text for: supplement",
       "heading": "Supplement"
+    },
+    {
+      "name": "type:reviewer-comment",
+      "color": "c2e0c6",
+      "description": "A comment from a reviewer or co-author to answer"
     }
   ]
 }

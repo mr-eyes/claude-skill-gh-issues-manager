@@ -74,8 +74,8 @@ def main(argv=None):
     if not os.path.isfile(args.body_file):
         sys.exit("error: not a file: %s" % args.body_file)
     draft = ghim.read_text(args.body_file)
-    profiles = [p.strip() for p in (getattr(args, "profile", None) or ",".join(config.get("profiles") or [])).split(",")
-                if p.strip()]
+    chosen = getattr(args, "profile", None)
+    profiles = [p.strip() for p in chosen.split(",") if p.strip()] if chosen else list(config.get("profiles") or [])
     follow = args.command == "body" and args.kind == "final-record" and not args.offline
     plan = None
     if follow:

@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "deliverable": "Labels every project gets, whatever its type.",
+  "deliverable": "Labels every project gets, whatever its type: roles, triage and the core issue types.",
   "events": [],
   "labels": [
     {
@@ -19,6 +19,11 @@
       "description": "Work in development; names its destination topic; carries no section labels"
     },
     {
+      "name": "triage",
+      "color": "fbca04",
+      "description": "Opened by hand; not yet placed in the record (see the triage workflow)"
+    },
+    {
       "name": "needs-decision",
       "color": "d93f0b",
       "description": "Waiting for a decision from the owner"
@@ -27,6 +32,51 @@
       "name": "migrated",
       "color": "c5def5",
       "description": "Content copied from an older tracker"
+    },
+    {
+      "name": "type:task",
+      "color": "c2e0c6",
+      "description": "A bounded piece of work"
+    },
+    {
+      "name": "type:bug",
+      "color": "c2e0c6",
+      "description": "Something does not work as it should"
+    },
+    {
+      "name": "type:question",
+      "color": "c2e0c6",
+      "description": "A question to answer from the record or the owner"
+    },
+    {
+      "name": "type:docs",
+      "color": "c2e0c6",
+      "description": "A documentation fix or addition"
+    },
+    {
+      "name": "type:idea",
+      "color": "c2e0c6",
+      "description": "A proposal for later"
+    },
+    {
+      "name": "type:data",
+      "color": "c2e0c6",
+      "description": "A problem or request about data"
+    },
+    {
+      "name": "type:decision-needed",
+      "color": "c2e0c6",
+      "description": "Only the owner can settle it"
+    },
+    {
+      "name": "type:duplicate",
+      "color": "c2e0c6",
+      "description": "Covered by another issue"
+    },
+    {
+      "name": "type:out-of-scope",
+      "color": "c2e0c6",
+      "description": "Outside what this project does"
     }
   ]
 }

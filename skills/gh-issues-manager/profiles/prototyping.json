@@ -1,6 +1,7 @@
 {
   "name": "prototyping",
   "deliverable": "A go or no-go recommendation with the evidence behind it.",
+  "prefix": "proto",
   "events": [
     "prototype run with its measurements",
     "go, no-go or pivot decision",
@@ -37,6 +38,11 @@
       "color": "1d76db",
       "description": "Issue body is recommendation text for: the go or no-go recommendation",
       "heading": "Recommendation"
+    },
+    {
+      "name": "type:experiment",
+      "color": "c2e0c6",
+      "description": "A prototype run to make"
     }
   ]
 }

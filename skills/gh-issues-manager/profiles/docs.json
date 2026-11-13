@@ -1,0 +1,41 @@
+{
+  "name": "docs",
+  "deliverable": "Documentation or a website.",
+  "prefix": "doc",
+  "events": [
+    "page published or changed",
+    "decision on structure or scope",
+    "reported error and its fix"
+  ],
+  "labels": [
+    {
+      "name": "doc:overview",
+      "color": "1d76db",
+      "description": "Issue body is documentation text for: overview",
+      "heading": "Overview"
+    },
+    {
+      "name": "doc:guides",
+      "color": "1d76db",
+      "description": "Issue body is documentation text for: guides and tutorials",
+      "heading": "Guides"
+    },
+    {
+      "name": "doc:reference",
+      "color": "1d76db",
+      "description": "Issue body is documentation text for: reference",
+      "heading": "Reference"
+    },
+    {
+      "name": "doc:questions",
+      "color": "1d76db",
+      "description": "Issue body is documentation text for: questions and answers",
+      "heading": "Questions and answers"
+    },
+    {
+      "name": "type:docs-request",
+      "color": "c2e0c6",
+      "description": "A request for documentation"
+    }
+  ]
+}

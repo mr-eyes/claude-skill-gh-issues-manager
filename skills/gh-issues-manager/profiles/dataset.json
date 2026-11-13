@@ -1,0 +1,48 @@
+{
+  "name": "dataset",
+  "deliverable": "A dataset or resource with its documentation.",
+  "prefix": "ds",
+  "events": [
+    "new release of the data",
+    "decision on content, format or access",
+    "failed or corrected processing",
+    "quality check result"
+  ],
+  "labels": [
+    {
+      "name": "ds:description",
+      "color": "1d76db",
+      "description": "Issue body is dataset documentation for: what the dataset holds",
+      "heading": "Description"
+    },
+    {
+      "name": "ds:collection",
+      "color": "1d76db",
+      "description": "Issue body is dataset documentation for: how it was collected",
+      "heading": "Collection"
+    },
+    {
+      "name": "ds:processing",
+      "color": "1d76db",
+      "description": "Issue body is dataset documentation for: how it was processed",
+      "heading": "Processing"
+    },
+    {
+      "name": "ds:quality",
+      "color": "1d76db",
+      "description": "Issue body is dataset documentation for: checks and known limits",
+      "heading": "Quality"
+    },
+    {
+      "name": "ds:access",
+      "color": "1d76db",
+      "description": "Issue body is dataset documentation for: access, license and citation",
+      "heading": "Access"
+    },
+    {
+      "name": "type:data-request",
+      "color": "c2e0c6",
+      "description": "A request for data or a data change"
+    }
+  ]
+}

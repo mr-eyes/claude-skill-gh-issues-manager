@@ -1,6 +1,7 @@
 {
   "name": "research",
   "deliverable": "A report or internal write-up of what was learned.",
+  "prefix": "rd",
   "events": [
     "finished experiment or analysis",
     "decision on direction or method",
@@ -38,6 +39,11 @@
       "color": "1d76db",
       "description": "Issue body is report text for: recommended next work",
       "heading": "Recommendations"
+    },
+    {
+      "name": "type:analysis",
+      "color": "c2e0c6",
+      "description": "A request for an analysis"
     }
   ]
 }

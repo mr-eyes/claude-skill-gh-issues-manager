@@ -13,6 +13,7 @@ Examples:
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,13 +30,28 @@ def load_profile(name):
 
 
 def wanted_labels(profiles, topics):
+    """Labels of core and the given profiles. A profile entry with sections chosen at setup brings its own section
+    labels in place of the profile's default ones, plus the profile's other labels (its issue types)."""
     labels, seen = [], set()
-    names = ["core"] + [p for p in profiles if p != "core"]
-    for name in names:
-        for label in load_profile(name)["labels"]:
+    entries = ["core"] + [p for p in profiles if p != "core"]
+    for entry in entries:
+        if isinstance(entry, dict):
+            parsed = ghim.custom_sections(entry)
+            if parsed is None:
+                sys.exit("error: a profile entry with sections is not valid: %s" % json.dumps(entry)[:200])
+            profile = load_profile(parsed[0])
+            color = next((l["color"] for l in profile["labels"] if l.get("heading")), "1d76db")
+            what = re.sub(r"^Issue body is (.*) for: .*$", r"\1", next(
+                (l["description"] for l in profile["labels"] if l.get("heading")), "Issue body is deliverable text for: x"))
+            own = [{"name": label, "color": color, "description": ("Issue body is %s for: %s" % (what, heading.lower()))[:100]}
+                   for label, heading in parsed[1]]
+            own += [l for l in profile["labels"] if not l.get("heading")]
+        else:
+            own = load_profile(entry)["labels"]
+        for label in own:
             if label["name"] not in seen:
                 seen.add(label["name"])
-                labels.append(label)
+                labels.append({k: label[k] for k in ("name", "color", "description") if k in label})
     for topic in topics:
         name = topic if topic.startswith("topic:") else "topic:" + topic
         if name not in seen:
@@ -63,7 +79,8 @@ def main(argv=None):
 
     config = ghim.load_config()
     repo = ghim.resolve_repo(args.repo, config)
-    profiles = [p.strip() for p in (args.profile or ",".join(config.get("profiles", []))).split(",") if p.strip()]
+    profiles = [p.strip() for p in args.profile.split(",") if p.strip()] if args.profile else \
+        list(config.get("profiles") or [])
     topics = args.topic or config.get("topics", [])
     labels = wanted_labels(profiles, topics)
 
@@ -78,7 +95,7 @@ def main(argv=None):
 
     print(ghim.describe(config, repo))
     print("repository: %s   profiles: core%s   labels wanted: %d"
-          % (repo, "".join(", " + p for p in profiles if p != "core"), len(labels)))
+          % (repo, "".join(", " + p for p in ghim.profile_names(profiles) if p != "core"), len(labels)))
     if existing is None:
         print("dry run without --existing: the repository was not read, so every label is shown as a creation")
 

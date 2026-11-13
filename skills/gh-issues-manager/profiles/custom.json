@@ -1,0 +1,11 @@
+{
+  "name": "custom",
+  "deliverable": "A deliverable with sections the user names at setup.",
+  "prefix": "sec",
+  "events": [
+    "result that enters the deliverable",
+    "decision on the deliverable",
+    "failure or correction"
+  ],
+  "labels": []
+}

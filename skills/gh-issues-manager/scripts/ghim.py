@@ -348,14 +348,69 @@ HEADING_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,.'()-]{0,59}")
 PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
 
 
+RESERVED_PREFIXES = {"topic", "type"}
+SECTION_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+
+
+def is_shipped(name):
+    return isinstance(name, str) and bool(PROFILE_NAME.fullmatch(name)) and \
+        os.path.isfile(os.path.join(PROFILE_DIR, name + ".json"))
+
+
+def profile_prefix(name):
+    """The section-label prefix of a shipped profile, for example "ms" for manuscript."""
+    profile = load_profile(name, shipped_only=True)
+    prefix = profile.get("prefix")
+    return prefix if isinstance(prefix, str) and re.fullmatch(r"[a-z]{1,10}", prefix) else None
+
+
+def custom_sections(entry):
+    """(profile name, [(label, heading)]) for a profile entry with sections chosen at setup, or None if invalid.
+
+    The entry names a shipped profile and lists [label, heading] pairs. Each
+    label must carry that profile's prefix and a plain slug, each heading a plain
+    form; duplicates, "Sources" and more than 20 sections are refused, so a
+    project file cannot name role, topic or type labels or carry other text.
+    """
+    if not isinstance(entry, dict) or set(entry) - {"name", "sections"} or not is_shipped(entry.get("name")):
+        return None
+    prefix = profile_prefix(entry["name"])
+    sections = entry.get("sections")
+    if not prefix or prefix in RESERVED_PREFIXES or not isinstance(sections, list) or not 1 <= len(sections) <= 20:
+        return None
+    out, labels, headings = [], set(), set()
+    for pair in sections:
+        if not (isinstance(pair, list) and len(pair) == 2 and all(isinstance(x, str) for x in pair)):
+            return None
+        label, heading = pair
+        if not (label.startswith(prefix + ":") and SECTION_SLUG.fullmatch(label[len(prefix) + 1:]) and
+                LABEL_NAME.fullmatch(label) and HEADING_TEXT.fullmatch(heading)):
+            return None
+        if label in labels or heading.lower() in headings or heading.lower() == SOURCES_HEADING.lower():
+            return None
+        labels.add(label)
+        headings.add(heading.lower())
+        out.append((label, heading))
+    return entry["name"], out
+
+
 def shipped_profiles(names):
-    """Only the names of profiles shipped in profiles/; hooks never load a profile from a path a project names."""
+    """The profile entries a hook may use: names of profiles shipped in profiles/, and entries with sections
+    chosen at setup that pass custom_sections. Hooks never load a profile from a path a project names."""
     out = []
-    for name in names or []:
-        if isinstance(name, str) and PROFILE_NAME.fullmatch(name) and \
-                os.path.isfile(os.path.join(PROFILE_DIR, name + ".json")):
-            out.append(name)
+    for entry in names or []:
+        if isinstance(entry, str) and is_shipped(entry):
+            out.append(entry)
+        elif isinstance(entry, dict):
+            parsed = custom_sections(entry)
+            if parsed:
+                out.append({"name": parsed[0], "sections": [list(pair) for pair in parsed[1]]})
     return out
+
+
+def profile_names(profiles):
+    """The profile names of a profiles list that may hold entries with sections chosen at setup."""
+    return [p["name"] if isinstance(p, dict) else p for p in profiles or [] if isinstance(p, (str, dict))]
 
 
 def section_labels(profiles, shipped_only=False):
@@ -368,6 +423,12 @@ def section_labels(profiles, shipped_only=False):
     """
     out = []
     for name in profiles:
+        if isinstance(name, dict):  # a profile with sections chosen at setup
+            parsed = custom_sections(name)
+            if parsed is None:
+                raise ValueError("a profile entry with sections is not valid (name, prefix, labels or headings)")
+            out.extend(parsed[1])
+            continue
         for label in load_profile(name, shipped_only).get("labels", []):
             heading, label_name = label.get("heading"), label.get("name")
             if isinstance(heading, str) and isinstance(label_name, str) and \

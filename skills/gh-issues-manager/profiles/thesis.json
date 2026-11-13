@@ -1,0 +1,55 @@
+{
+  "name": "thesis",
+  "deliverable": "A thesis or a report made of chapters.",
+  "prefix": "th",
+  "events": [
+    "result that enters a chapter",
+    "decision on a claim or a chapter",
+    "supervisor or committee comment and its answer",
+    "frozen data or code version",
+    "submission or defense"
+  ],
+  "labels": [
+    {
+      "name": "th:introduction",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: introduction",
+      "heading": "Introduction"
+    },
+    {
+      "name": "th:background",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: background and related work",
+      "heading": "Background"
+    },
+    {
+      "name": "th:methods",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: methods",
+      "heading": "Methods"
+    },
+    {
+      "name": "th:results",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: results",
+      "heading": "Results"
+    },
+    {
+      "name": "th:discussion",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: discussion",
+      "heading": "Discussion"
+    },
+    {
+      "name": "th:appendix",
+      "color": "1d76db",
+      "description": "Issue body is thesis text for: appendix",
+      "heading": "Appendix"
+    },
+    {
+      "name": "type:supervisor-comment",
+      "color": "c2e0c6",
+      "description": "A comment from a supervisor or committee member"
+    }
+  ]
+}

@@ -115,7 +115,8 @@ def main(argv=None):
     config = ghim.load_config()
     repo = ghim.resolve_repo(args.repo, config)
     print(ghim.describe(config, repo))
-    profiles = [p.strip() for p in (args.profile or ",".join(config.get("profiles") or [])).split(",") if p.strip()]
+    profiles = [p.strip() for p in args.profile.split(",") if p.strip()] if args.profile else \
+        list(config.get("profiles") or [])
     for path in (args.body_file, args.expected):
         if not os.path.isfile(path):
             sys.exit("error: not a file: %s" % path)
