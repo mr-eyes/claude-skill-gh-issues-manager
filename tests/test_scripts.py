@@ -2976,6 +2976,16 @@ class SetupTests(Sandbox):
             self.assertNotEqual(0, result.returncode, field)
             self.assertIn("has values that do not fit: %s" % field, result.stderr)
             self.assertEqual(planted, ghim.read_text(os.path.join(root, ghim.CONFIG_NAME)))
+        # setup_labels.py loads the profiles a project's setup names only from the plugin's profiles folder
+        root = self.project()
+        with open(os.path.join(root, "evil.json"), "w") as handle:
+            json.dump({"labels": [{"name": "planted", "color": "000000", "description": "x"}]}, handle)
+        with open(os.path.join(root, ghim.CONFIG_NAME), "w") as handle:
+            json.dump({"repo": REPO, "profiles": ["evil.json"]}, handle)
+        labels = self.run_script("setup_labels.py", "--dry-run", cwd=root, env={"CLAUDE_PROJECT_DIR": root})
+        self.assertNotEqual(0, labels.returncode)
+        self.assertIn("no shipped profile 'evil.json'", labels.stderr)
+        self.assertNotIn("planted", labels.stdout)
 
     def test_custom_deliverables_keep_their_names_and_labels(self):
         sys.path.insert(0, SCRIPTS)
