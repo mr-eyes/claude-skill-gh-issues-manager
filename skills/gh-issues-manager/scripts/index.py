@@ -5,10 +5,10 @@ GitHub stays the record. The index is a copy that the hooks, compile.py and the
 consistency checks read without asking GitHub again. It can be deleted or
 rebuilt with `sync --rebuild` whenever its content is in doubt.
 
-Where it lives: <CLAUDE_PLUGIN_DATA>/<owner>__<repo>/index.sqlite, or, when
-Claude Code has not set CLAUDE_PLUGIN_DATA, $XDG_CACHE_HOME/gh-issues-manager/
-<owner>__<repo>/index.sqlite (by default under ~/.cache). Never in the project
-tree. An index that is a symlink, is writable by others, belongs to another
+Where it lives: <CLAUDE_PLUGIN_DATA>/private/<owner>__<repo>/index.sqlite, or,
+when Claude Code has not set CLAUDE_PLUGIN_DATA, $XDG_CACHE_HOME/gh-issues-manager/
+private/<owner>__<repo>/index.sqlite (by default under ~/.cache). Never in the
+project tree. An index that is a symlink, is writable by others, belongs to another
 user or repository, or was not created by this plugin for this user is not
 read (see storage.py).
 
@@ -88,14 +88,14 @@ CLOSED_OUT_TYPES = {"type:duplicate", "type:out-of-scope"}
 
 
 def index_dir(repo):
-    return os.path.join(storage.cache_root(), storage.repo_folder(repo))
+    return os.path.join(storage.cache_top(), storage.PRIVATE, storage.repo_folder(repo))
 
 
 def index_path(repo):
     return os.path.join(index_dir(repo), "index.sqlite")
 
 
-def connect(repo, create=True):
+def connect(repo, create=True, tighten=True):
     """Open the index of `repo`, or None when there is none and create is False.
 
     Raises storage.StorageError for an index that must not be read: a symlink,
@@ -103,9 +103,7 @@ def connect(repo, create=True):
     or without the mark this plugin gives the index files it creates.
     """
     path = index_path(repo)
-    if create:
-        storage.secure_folder(storage.cache_root(), storage.repo_folder(repo))
-    elif not (storage.check_path(storage.cache_root()) and storage.check_path(index_dir(repo))):
+    if storage.folder(storage.cache_top(), storage.repo_folder(repo), create=create, tighten=tighten) is None:
         return None
     exists = storage.check_path(path, "file")
     if not exists and not create:
@@ -117,7 +115,7 @@ def connect(repo, create=True):
             found = dict(db.execute("SELECT key, value FROM meta WHERE key IN ('repo', 'format', 'mark')").fetchall())
         except sqlite3.Error:
             found = {}
-        expected = {"repo": repo.lower(), "format": FORMAT, "mark": storage.mark(path, repo)}
+        expected = {"repo": repo.lower(), "format": FORMAT, "mark": storage.mark(path, repo, create=create, tighten=tighten)}
         if found != expected:
             db.close()
             what = "of another repository (%s)" % found.get("repo") if found.get("repo") not in (None, repo.lower()) \
@@ -297,6 +295,7 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
     derive(db, repo, hub)
     set_meta(db, "hub", str(hub or ""))
     set_meta(db, "synced_at", now_utc())
+    set_meta(db, "last_sync_error", "")
     set_meta(db, "sync_complete", "1" if summary["complete"] else "0")
     db.commit()
     db.close()
