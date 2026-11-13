@@ -13,10 +13,13 @@ gap        Read-only. Commits, merged pull requests and changed files after the
            newest recorded event in the local index (or --since), for a backfill
            of work done while the record was not kept.
 event      Writes one reconstructed event comment draft: the original time in
-           the heading and marker, the time it is recorded, and its dated
-           source. Only an event with a dated source is drafted; a decision
-           without the decider's recorded words is written as "Decision
-           inferred from <source>", never as a quote.
+           the heading (in UTC, marked UTC) and marker, the time it is
+           recorded, and its dated source. Only an event with a dated source is
+           drafted; for a commit source, --at must match the commit's time
+           (git show) within one minute. A decision is quoted only when a '>'
+           block stands directly under its "**Exact words:**" line; without
+           one it is written as "Decision inferred from <source>", never as a
+           quote.
 
 Nothing here posts. Drafts go through the usual review and post_verified.py.
 
@@ -47,6 +50,40 @@ RESULT_FOLDERS = ("results", "figures", "figs", "plots", "output", "out", "repor
 SKIP = {".git", "node_modules", ".tmp", "__pycache__", ".venv", "venv", "env", ".tox"}
 SOURCE = re.compile(r"(commit|pr|issue|file|transcript):[\w./#:@+-]{1,200}")
 TYPES = ("result", "decision", "failure", "checkpoint", "correction")
+COMMIT_SOURCE = re.compile(r"commit:([0-9a-f]{4,40})")
+
+
+def commit_time_problem(root, source, at):
+    """None when the source is not a commit, or when --at matches the commit's time within one minute; else why."""
+    match = COMMIT_SOURCE.fullmatch(source or "")
+    if (source or "").startswith("commit:") and not match:
+        return "a commit source is commit:<hexadecimal hash>"
+    if not match or not re.fullmatch(record_format.ISO, at or ""):
+        return None  # render_event says what is wrong with --at
+    committed = git(root, "show", "-s", "--format=%cI", match.group(1) + "^{commit}").strip()
+    if not committed:
+        return "commit %s is not in the git history of %s" % (match.group(1), root)
+    try:
+        then = datetime.datetime.fromisoformat(committed)
+        given = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except ValueError:
+        return "the time of commit %s could not be read" % match.group(1)
+    if abs((then - given).total_seconds()) > 60:
+        return "--at %s does not match the time of commit %s (%s); use the commit's time" % (at, match.group(1),
+                                                                                           committed)
+    return None
+
+
+def quoted_words(text):
+    """True when a '>' block with text stands directly under the "**Exact words:**" line (blank lines between)."""
+    lines = text.split("\n")
+    for number, line in enumerate(lines):
+        if re.match(r"^\*\*Exact words:\*\*\s*$", line):
+            for after in lines[number + 1:]:
+                if not after.strip():
+                    continue
+                return after.lstrip().startswith(">") and bool(after.lstrip(" >").strip())
+    return False
 
 
 def stamp(seconds):
@@ -229,13 +266,17 @@ def render_event(kind, at, title, source, body, now=None):
         kind, original.strftime("%Y-%m-%dT%H:%M:%SZ"), recorded, source)
     heading = "### %s (reconstructed): %s - %s" % (kind.capitalize(), original.strftime("%Y-%m-%d %H:%M UTC"), title)
     text = body.strip("\n")
-    if kind == "decision" and not any(line.lstrip().startswith(">") for line in text.split("\n")) and \
-            "decision inferred from" not in text.lower():
-        text = "Decision inferred from %s; the decider's words were not recorded.\n\n%s" % (source, text)
-        text = re.sub(r"^\*\*Exact words:\*\*\s*$", "**Exact words:** Not recorded; decision inferred from %s." % source,
-                      text, count=1, flags=re.M)
-    note = ("Reconstructed: recorded %s from %s. The time above is the time of the source, not of this comment."
-            % (recorded, source))
+    shown = "`%s`" % source  # in backticks: a path with @ or # is not a mention or a link
+    if kind == "decision":
+        inferred = "decision inferred from" in text.lower()
+        if quoted_words(text) and inferred:
+            raise ValueError("a decision is either quoted under **Exact words:** or inferred from its source, not both")
+        if not quoted_words(text) and not inferred:
+            text = "Decision inferred from %s; the decider's words were not recorded.\n\n%s" % (shown, text)
+            text = re.sub(r"^\*\*Exact words:\*\*\s*$", "**Exact words:** Not recorded; decision inferred from %s."
+                          % shown, text, count=1, flags=re.M)
+    note = ("Reconstructed: recorded %s from %s. The time above is the time of the source in UTC, not the time of this "
+            "comment." % (recorded, shown))
     return "%s\n%s\n\n%s\n\n%s\n" % (marker, heading, note, text)
 
 
@@ -292,6 +333,9 @@ def main(argv=None):
         for row in found["pull_requests"]:
             print("  pull request #%s %s %s" % (row.get("number"), row.get("mergedAt"), str(row.get("title"))[:100]))
         return 0
+    problem = commit_time_problem(root, args.source, args.at)
+    if problem:
+        sys.exit("error: %s" % problem)
     try:
         text = render_event(args.type, args.at, args.title, args.source, ghim.read_text(args.body_file))
     except (ValueError, OSError) as error:

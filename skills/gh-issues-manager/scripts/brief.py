@@ -154,7 +154,7 @@ def session_lines(record, topic_limit, active_limit):
         lines.append("- #%d %s" % (number, record.title(number)))
     if len(active) > active_limit:
         lines.append("- and %d more" % (len(active) - active_limit))
-    untriaged = [row["issue"] for row in index.triage(record.db)]
+    untriaged = [row["issue"] for row in index.triage(record.db, record.allowed)]
     if untriaged:
         lines.append("%d issue%s need%s triage: %s%s" % (
             len(untriaged), "" if len(untriaged) == 1 else "s", "s" if len(untriaged) == 1 else "",

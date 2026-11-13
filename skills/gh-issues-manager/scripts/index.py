@@ -24,8 +24,9 @@ query    answers from the index alone, with no network:
                          disagree with headings, figures and tables without a source
            impact        bodies, figures, tables and events that cite --path or --commit
            timeline      every event in time order, filtered by --issue, --type, --since
-           triage        open issues with no role label (hub, final-record, active,
-                         triage) and no closed-out type: opened by hand, not yet triaged
+           triage        open issues that need triage: those labeled triage, and those
+                         with no role label (hub, final-record, active) and no closed-out
+                         type that have no triage comment from an allowed account
 status   says where the index is, how old it is and what it holds.
 
 Examples:
@@ -101,9 +102,9 @@ RAW = ("issues", "comments", "timeline", "meta")
 TIMELINE_KEEP = {"labeled", "unlabeled", "renamed", "closed", "reopened", "pinned", "unpinned",
                  "transferred", "milestoned", "demilestoned", "connected", "referenced"}
 GRAPHQL_BATCH = 40
-# An open issue with none of these labels has not been triaged. `type:` labels other than the closed-out ones
-# describe an issue; they do not place it in the record.
-ROLE_LABELS = {"hub", "final-record", "active", "triage"}
+# An open issue with none of these labels has not been placed in the record. `type:` labels other than the
+# closed-out ones describe an issue; they do not place it. The `triage` label always asks for triage.
+ROLE_LABELS = {"hub", "final-record", "active"}
 CLOSED_OUT_TYPES = {"type:duplicate", "type:out-of-scope"}
 
 
@@ -905,12 +906,18 @@ def issue_labels(db, number):
     return [r["label"] for r in db.execute("SELECT label FROM labels WHERE issue = ?", (number,))]
 
 
-def triage(db):
-    """Open issues, not pull requests, with no role label and no closed-out type: people opened them by hand."""
+def triage(db, allowed=frozenset()):
+    """Open issues, not pull requests, that need triage: every issue labeled `triage`, and every issue with no role
+    label and no closed-out type (people opened it by hand) that has no triage comment yet from an allowed account.
+    A triaged issue may stay open without a role label (a question being answered); it is listed again only when
+    the `triage` label is added."""
+    triaged = {row["issue"] for row in db.execute("SELECT issue, author FROM events WHERE type = 'triage'")
+               if (row["author"] or "").lower() in allowed}
     rows = []
     for issue in db.execute("SELECT * FROM issues WHERE state = 'open' AND is_pr = 0 ORDER BY number"):
         labels = sorted(issue_labels(db, issue["number"]))
-        if not {l.lower() for l in labels} & (ROLE_LABELS | CLOSED_OUT_TYPES):
+        lowered = {l.lower() for l in labels}
+        if "triage" in lowered or not lowered & (ROLE_LABELS | CLOSED_OUT_TYPES) and issue["number"] not in triaged:
             rows.append({"issue": issue["number"], "title": issue["title"], "author": issue["author"],
                          "created_at": issue["created_at"], "labels": labels, "url": issue["url"]})
     return rows
@@ -1135,7 +1142,7 @@ def main(argv=None):
             print("%d place(s) cite %s" % (len(rows), args.path or args.commit))
         return 0
     if args.name == "triage":
-        rows = triage(db)
+        rows = triage(db, ghim.allowed_users(repo))
         if args.json:
             print(json.dumps(rows, indent=1))
         else:
@@ -1144,7 +1151,7 @@ def main(argv=None):
                 print("#%d  opened %s by %s  labels: %s  title: %s"
                       % (row["issue"], clean(row["created_at"], 40), clean(row["author"], 40),
                          clean(", ".join(row["labels"])) or "none", clean(row["title"])))
-            print("%d open issue(s) without a role label need triage" % len(rows))
+            print("%d open issue(s) need triage" % len(rows))
         return 0
     rows = timeline(db, args.issue, args.type, args.since)
     if args.json:

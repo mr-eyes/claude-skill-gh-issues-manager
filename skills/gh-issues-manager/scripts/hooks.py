@@ -15,7 +15,12 @@ Events:
 
 Every event prints nothing and exits 0 when the project has no
 .gh-issues-manager.json, when its repository is not in the user's trusted list,
-when there is no index yet, or on any error. Nothing here writes to GitHub.
+when there is no index yet, or on any error, with two exceptions of fixed
+wording: at session start in the top folder of a git checkout with a GitHub
+remote and no .gh-issues-manager.json, one line offers to set up the record,
+once per project (off with GHIM_DISCOVERY=0 or "discovery": false in
+~/.config/gh-issues-manager/settings.json); and in a project that is set up and
+trusted, one line says why the brief is not shown. Nothing here writes to GitHub.
 
 --print shows the four payloads and their sizes, for the user to check.
 --doctor says why a brief is not shown: configuration, trust, the storage
@@ -207,30 +212,29 @@ def discovery():
 
 
 def new_signal(repo, config, room):
-    """One fixed line naming a deliverable that files now suggest and the setup does not cover, once per kind."""
-    import setup
+    """One fixed line naming a deliverable that files now suggest and the setup does not cover, once per kind. The
+    line is optional: any failure (a malformed setup, refused storage, an unreadable folder) gives no line, and the
+    brief is shown as usual."""
     try:
-        signals = setup.uncovered_signals(os.path.realpath(ghim.project_root()), config)
-    except OSError:
+        import setup
+        path = setup.told_path(repo)
+        told = setup.read_told(path)
+        covered = setup.covered_profiles(config)
+        pending = {kind for kind, (profile, _) in setup.KINDS.items()
+                   if kind in SIGNAL_WORDS and kind not in told and profile not in covered}
+        if not pending:
+            return ""  # every kind is covered or already mentioned: the project folder is not looked at
+        for item in setup.uncovered_signals(os.path.realpath(ghim.project_root()), config):
+            if item["kind"] not in pending:
+                continue
+            line = SIGNAL % (SIGNAL_WORDS[item["kind"]], ", ".join(e for e in item["evidence"] if re.fullmatch(
+                r"[\w ./*-]{1,40}", e))[:120])
+            if len(line) + 1 > room:
+                return ""
+            storage.write_file(path, json.dumps(told + [item["kind"]]))
+            return line
+    except Exception:  # noqa: BLE001 - the line is optional; the brief does not depend on it
         return ""
-    if not signals:
-        return ""
-    private = storage.folder(storage.cache_top(), storage.repo_folder(repo))
-    path = os.path.join(private, "signals.json")
-    try:
-        told = json.loads(storage.read_file(path) or "[]")
-    except ValueError:
-        told = []
-    told = [k for k in told if k in SIGNAL_WORDS] if isinstance(told, list) else []
-    for item in signals:
-        if item["kind"] in told or item["kind"] not in SIGNAL_WORDS:
-            continue
-        line = SIGNAL % (SIGNAL_WORDS[item["kind"]], ", ".join(e for e in item["evidence"] if re.fullmatch(
-            r"[\w ./*-]{1,40}", e))[:120])
-        if len(line) + 1 > room:
-            return ""
-        storage.write_file(path, json.dumps(told + [item["kind"]]))
-        return line
     return ""
 
 
