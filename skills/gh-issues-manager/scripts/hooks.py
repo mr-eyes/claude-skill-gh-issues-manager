@@ -133,7 +133,7 @@ def run(event, data, budget):
     """The text a hook prints. Silent when the project is not set up or not trusted; one line when the brief fails."""
     found = configured()
     if found is None:
-        return ""
+        return discovery() if event == "session-start" else ""
     config, repo, hub = found
     try:
         return produce(event, data, budget, config, repo, hub)
@@ -149,6 +149,88 @@ def run(event, data, budget):
         return line
     if event == "subagent-start":
         return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": line}})
+    return ""
+
+
+DISCOVERY = ("gh-issues-manager is installed, and this project has no record yet. Ask to set up the record (a few "
+             "questions), or to catch up on earlier work. This line is shown once per project.")
+SIGNAL = ("gh-issues-manager: the project now has %s (%s), a deliverable the setup does not cover. Ask the user once "
+          "whether to add it with setup.py apply.")
+SIGNAL_WORDS = {"paper": "paper or manuscript files", "thesis": "thesis files", "software": "software files",
+                "dataset": "dataset files", "report": "analysis files", "prototype": "prototype files",
+                "proposal": "proposal files", "docs": "documentation files"}
+
+
+def discovery_off():
+    if os.environ.get("GHIM_DISCOVERY", "").strip().lower() in ("0", "off", "no", "false"):
+        return True
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    try:
+        with open(os.path.join(base, "gh-issues-manager", "settings.json"), encoding="utf-8") as handle:
+            return json.load(handle).get("discovery") is False
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def discovery():
+    """One fixed line, once per project, for a git repository with a GitHub remote and no setup. No network; no
+    project file is read (git reports the remotes)."""
+    import subprocess
+    if ghim.find_config() or discovery_off():
+        return ""
+    root = os.path.realpath(ghim.project_root())
+    try:
+        top = subprocess.run(["git", "-C", root, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             timeout=3).stdout.strip()
+        if not top or os.path.realpath(top) != root:
+            return ""  # only the top folder of a git checkout is a project here
+        remotes = subprocess.run(["git", "-C", root, "config", "--get-regexp", r"^remote\..*\.url$"],
+                                 capture_output=True, text=True, timeout=3).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if "github.com" not in remotes:
+        return ""
+    private = storage.folder(storage.state_top(for_key=True))
+    path = os.path.join(private, "discovery.json")
+    try:
+        seen = json.loads(storage.read_file(path) or "{}")
+    except ValueError:
+        seen = {}
+    seen = {k: v for k, v in seen.items() if re.fullmatch(r"[0-9a-f]{16}", k) and isinstance(v, (int, float))} \
+        if isinstance(seen, dict) else {}
+    key = digest(root)
+    if key in seen:
+        return ""
+    seen[key] = time.time()
+    storage.write_file(path, json.dumps(seen))
+    return DISCOVERY
+
+
+def new_signal(repo, config, room):
+    """One fixed line naming a deliverable that files now suggest and the setup does not cover, once per kind."""
+    import setup
+    try:
+        signals = setup.uncovered_signals(os.path.realpath(ghim.project_root()), config)
+    except OSError:
+        return ""
+    if not signals:
+        return ""
+    private = storage.folder(storage.cache_top(), storage.repo_folder(repo))
+    path = os.path.join(private, "signals.json")
+    try:
+        told = json.loads(storage.read_file(path) or "[]")
+    except ValueError:
+        told = []
+    told = [k for k in told if k in SIGNAL_WORDS] if isinstance(told, list) else []
+    for item in signals:
+        if item["kind"] in told or item["kind"] not in SIGNAL_WORDS:
+            continue
+        line = SIGNAL % (SIGNAL_WORDS[item["kind"]], ", ".join(e for e in item["evidence"] if re.fullmatch(
+            r"[\w ./*-]{1,40}", e))[:120])
+        if len(line) + 1 > room:
+            return ""
+        storage.write_file(path, json.dumps(told + [item["kind"]]))
+        return line
     return ""
 
 
@@ -268,7 +350,8 @@ def produce(event, data, budget, config, repo, hub):
         if event == "session-start":
             text = brief.session_payload(record, fresh)
             remember(repo, session, digest(record.key()), brief=True)
-            return text
+            signal = new_signal(repo, config, brief.CAPS["session-start"] - len(text))
+            return text + ("\n" + signal if signal else "")
         if event == "subagent-start":
             return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                                       "additionalContext": brief.subagent_payload(record)}})
