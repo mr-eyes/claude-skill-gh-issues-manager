@@ -474,7 +474,12 @@ def run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap):
             db.commit()
 
         if hub and not clock.passed():
-            read_resume(db, repo, hub, clock.left(timeout))
+            try:
+                read_resume(db, repo, hub, clock.left(timeout))
+            except ghim.GhError:
+                if clock.passed():  # the read is not a call through call(); a timeout at the budget is the budget
+                    raise DeadlineReached("deadline reached during the resume read")
+                raise
         elif hub:
             summary["complete"] = False
     except DeadlineReached:
@@ -786,7 +791,8 @@ def background_sync(repo, hub, budget, lock_held=False):
 
 
 def background_status(repo):
-    """For --doctor: running (dict or None), the last outcome (dict or None) and the last error line of the log."""
+    """For --doctor: running (dict or None), the last outcome (dict or None) and the last error line of the log,
+    which is left out once a background sync finished after it."""
     files = background_files(repo)
     try:
         status = json.loads(storage.read_file(files["status"]) or "null")
@@ -797,22 +803,30 @@ def background_status(repo):
         for line in (storage.read_file(files["log"]) or "").split("\n"):
             if " error" in line:
                 last_error = line
+            elif " background sync finished: " in line:
+                last_error = ""
     except (storage.StorageError, OSError):
         pass
     return running(repo), status if isinstance(status, dict) else None, last_error
 
 
 def read_resume(db, repo, hub, timeout):
-    """Store the newest usable resume block of the hub, with the same trust and author checks as resume_block.py."""
+    """Store the newest usable resume block of the hub, with the same trust and author checks as resume_block.py.
+
+    A read that fails leaves the stored block and its note as they were; the brief keeps showing the block that
+    was checked when it was read.
+    """
     allowed = ghim.allowed_users(repo)
-    set_meta(db, "resume", "")
-    set_meta(db, "resume_ignored", "")
     if not allowed:
+        set_meta(db, "resume", "")
+        set_meta(db, "resume_ignored", "")
         set_meta(db, "resume_note", "repository not trusted; resume block not read")
         return
     where = "%s#%d" % (repo, hub)
     comments = ghim.read_hub_comments(repo, hub, timeout=timeout)
     chosen, ignored = ghim.pick_resume_comment(comments, allowed)
+    set_meta(db, "resume", "")
+    set_meta(db, "resume_ignored", "")
     skipped = "; ".join("%d %s" % (count, reason) for reason, count in sorted(ignored.items()))
     if chosen is None:
         if ignored:
