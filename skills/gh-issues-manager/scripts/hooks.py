@@ -426,6 +426,43 @@ def print_all():
     return 0
 
 
+def lock_lines(repo, active, problems):
+    """For --doctor: a line for a sync lock that is there but not live, and one for a claim that is there. Only fixed
+    wording, the paths and numbers from a lock that passed index.valid_lock are printed, never the lock's text."""
+    lock = index.background_files(repo)["lock"]
+    claim = lock + ".claim"
+    if not active and os.path.lexists(lock):
+        try:
+            storage.check_path(lock, "file")
+        except storage.StorageError as error:
+            problems.append("sync lock refused: %s" % error)
+            print("sync lock: refused (%s); every sync stops at it until it is fixed or removed" % error)
+        else:
+            data = index.valid_lock(index.read_lock(lock))
+            if data:
+                print("sync lock: %s is there but not live: pid %d on %s, started %s UTC, budget %d s; the next sync "
+                      "removes it" % (lock, int(data["pid"]), "this host" if data["host"] == index.HOST else
+                                      "another host", time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(data["started"])),
+                                      int(data["budget"])))
+            else:
+                print("sync lock: %s is there but is not a valid lock (its text is not shown); the next sync removes "
+                      "it" % lock)
+    if not os.path.lexists(claim):
+        return
+    if index.claim_not_a_file(claim):
+        problems.append("the sync lock claim %s is not a file; a sync that finds a lock in its way stops with an "
+                        "error until the claim is removed" % claim)
+        print("sync lock claim: %s is not a file (a folder, for example); a sync that finds a lock in its way stops "
+              "with an error until the claim is removed" % claim)
+        return
+    try:
+        age = max(0, int(time.time() - os.lstat(claim).st_mtime))
+    except OSError:
+        return
+    print("sync lock claim: %s is there, time stamp %d s ago; a process holds it while it judges the lock, and a "
+          "claim left by a process that died is removed by the next sync after about two seconds" % (claim, age))
+
+
 def doctor():
     """Print what the hooks depend on. Returns 1 when something keeps the brief from being shown."""
     import shutil
@@ -522,6 +559,7 @@ def doctor():
                  int(active["budget"])))
     else:
         print("background sync: not running")
+    lock_lines(repo, active, problems)
     if last:
         print("last background sync: finished %s, %s" % (index.clean(last.get("finished"), 40),
                                                           index.clean(last.get("result"), 120)))

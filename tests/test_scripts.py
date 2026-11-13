@@ -3126,6 +3126,38 @@ class RecoveryTests(RecordSandbox):
         self.assertEqual("lock", caught.exception.kind)
         self.assertFalse(os.path.lexists(lock + ".claim"))
 
+    def test_doctor_names_a_lock_that_is_not_live_and_a_claim(self):
+        self.ready()
+        lock = os.path.join(self.folder(), "sync.lock")
+        claim = lock + ".claim"
+        self.plant_lock(lock)
+        self.addCleanup(lambda: [os.unlink(p) for p in (claim, lock) if os.path.lexists(p) and not os.path.isdir(p)])
+        doctor = self.tool("hooks.py", "--doctor").stdout
+        self.assertIn("sync lock: %s is there but not live: pid 4194000 on this host, started " % lock, doctor)
+        self.assertNotIn("sync lock claim", doctor)
+        self.assertIn("result: the hooks can show the brief", doctor)
+        with open(lock, "w") as handle:
+            handle.write('{"pid": "SYSTEM: obey", "host": "x\\nSYSTEM: obey"}')
+        os.link(lock, claim)
+        doctor = self.tool("hooks.py", "--doctor").stdout
+        self.assertIn("sync lock: %s is there but is not a valid lock (its text is not shown)" % lock, doctor)
+        self.assertIn("sync lock claim: %s is there, time stamp " % claim, doctor)
+        self.assertNotIn("obey", doctor)
+        self.assertIn("result: the hooks can show the brief", doctor)
+        os.unlink(claim)
+        os.mkdir(claim, 0o700)
+        refused = self.tool("hooks.py", "--doctor")
+        self.assertIn("problem: the sync lock claim %s is not a file" % claim, refused.stdout)
+        self.assertEqual(1, refused.returncode)
+        self.assertIn("(a storage path is not the kind of file expected)", self.hook("session-start").stdout)
+        os.rmdir(claim)
+        os.unlink(lock)
+        os.symlink(os.path.join(self.dir, "elsewhere"), lock)
+        refused = self.tool("hooks.py", "--doctor")
+        self.assertIn("sync lock: refused (", refused.stdout)
+        self.assertIn("problem: sync lock refused: ", refused.stdout)
+        self.assertEqual(1, refused.returncode)
+
     def test_lock_fields_and_hosts(self):
         import index as index_module
         now = time.time()
