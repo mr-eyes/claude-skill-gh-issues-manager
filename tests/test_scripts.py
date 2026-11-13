@@ -61,6 +61,7 @@ class Sandbox(unittest.TestCase):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "CLAUDE_PROJECT_DIR", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA"):
             full_env.pop(variable, None)
+        full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"))
         full_env["GHIM_TRUSTED_FILE"] = os.path.join(self.dir, "no-trusted-file")
         full_env.update(env or {})
         command = [sys.executable, os.path.join(SCRIPTS, name)] + list(args)
@@ -1068,6 +1069,7 @@ class ResumeBlockTests(Sandbox):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "CLAUDE_PROJECT_DIR", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA"):
             full_env.pop(variable, None)
+        full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"))
         full_env.update(GHIM_HOOK_TIMEOUT="40", GHIM_HOOK_CALL_TIMEOUT="15")  # slow disks must not fail the tests
         full_env.update(self.env)
         full_env.update(env or {})
@@ -1432,6 +1434,7 @@ class RecordSandbox(Sandbox):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA"):
             full_env.pop(variable, None)
+        full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"))
         full_env.update(self.env)
         full_env.update(env or {})
         command = [sys.executable, os.path.join(SCRIPTS, name)] + list(args)
@@ -1441,6 +1444,7 @@ class RecordSandbox(Sandbox):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA"):
             full_env.pop(variable, None)
+        full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"))
         full_env.update(self.env)
         full_env.update(env or {})
         payload = json.dumps({"hook_event_name": event, "session_id": session, "cwd": self.project})
@@ -1566,9 +1570,9 @@ class HookTests(RecordSandbox):
         self.hook("session-start")
         cached = self.hook("session-start", gh="false")
         self.assertEqual(0, cached.returncode)
-        self.assertIn("cached: GitHub could not be read just now; this comes from the local index synced", cached.stdout)
-        self.assertIn("minutes old", cached.stdout)
-        self.assertIn("**Current focus:** Release 0.3.0", cached.stdout)
+        self.assertIn("(cached, not refreshed (index synced 20", cached.stdout)
+        self.assertIn("minutes old): GitHub could not be read just now", cached.stdout)
+        self.assertIn("**Current focus:** Release 0.3.0", cached.stdout)  # read 0 days ago, within the 7-day limit
 
     def test_every_hook_is_silent_unless_configured_and_trusted(self):
         self.hook("session-start")
@@ -1652,6 +1656,119 @@ class HookTests(RecordSandbox):
         self.assertNotIn("need triage", session)
         self.assertNotIn("needs triage", session)
         self.assertEqual([], self.query("triage"))
+
+
+class StorageTests(RecordSandbox):
+    """The index and the hook state live outside the project tree and are read only when the plugin made them."""
+
+    def index_file(self):
+        return os.path.join(self.data, "example-org__tinycsv", "index.sqlite")
+
+    def set_meta(self, **values):
+        import sqlite3
+        db = sqlite3.connect(self.index_file())
+        for key, value in values.items():
+            db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
+        db.commit()
+        db.close()
+
+    def plant(self, path, resume="PLANTED TEXT"):
+        import sqlite3
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        db = sqlite3.connect(path)
+        db.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+        for key, value in (("repo", REPO), ("format", "1"), ("mark", "0" * 64), ("synced_at", "2026-04-01T00:00:00Z"),
+                           ("resume", resume), ("hub", "4")):
+            db.execute("INSERT INTO meta VALUES (?, ?)", (key, value))
+        db.commit()
+        db.close()
+        for folder in (os.path.dirname(os.path.dirname(path)), os.path.dirname(path)):
+            os.chmod(folder, 0o700)  # tidy permissions, so that only the missing mark can be the reason to refuse
+        os.chmod(path, 0o600)
+
+    def test_index_without_plugin_data_goes_to_the_user_cache_never_the_project(self):
+        del self.env["CLAUDE_PLUGIN_DATA"]
+        self.plant(os.path.join(self.project, ".tmp", "gh-issues-manager", "example-org__tinycsv", "index.sqlite"))
+        self.assertEqual("", self.hook("session-start", gh="false").stdout)  # the planted file is never looked at
+        self.hook("session-start")
+        made = os.path.join(self.dir, "xdg-cache", "gh-issues-manager", "example-org__tinycsv", "index.sqlite")
+        self.assertTrue(os.path.isfile(made))
+        self.assertEqual(0o700, os.stat(os.path.dirname(made)).st_mode & 0o777)
+        self.assertEqual(0o600, os.stat(made).st_mode & 0o777)
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-state", "gh-issues-manager", "key")))
+        cached = self.hook("session-start", gh="false").stdout
+        self.assertIn("cached, not refreshed", cached)
+        self.assertNotIn("PLANTED", cached)
+
+    def test_an_index_the_plugin_did_not_make_is_refused(self):
+        self.plant(self.index_file())
+        for gh in ("false", FAKE):
+            self.assertEqual("", self.hook("session-start", gh=gh).stdout)
+        status = self.tool("index.py", "status")
+        self.assertNotEqual(0, status.returncode)
+        self.assertIn("not created by this plugin for this user", status.stderr)
+
+    def test_an_index_of_another_repository_is_refused(self):
+        self.tool("index.py", "sync")
+        self.set_meta(repo="someone/else")
+        status = self.tool("index.py", "status")
+        self.assertIn("of another repository (someone/else)", status.stderr)
+        self.assertEqual("", self.hook("pre-compact").stdout)
+
+    def test_symlinks_and_loose_permissions_are_refused(self):
+        self.tool("index.py", "sync")
+        os.chmod(self.index_file(), 0o664)
+        self.assertIn("writable by group or others", self.tool("index.py", "status").stderr)
+        self.assertEqual("", self.hook("subagent-start").stdout)
+        os.chmod(self.index_file(), 0o600)
+        moved = os.path.join(self.dir, "elsewhere.sqlite")
+        os.rename(self.index_file(), moved)
+        os.symlink(moved, self.index_file())
+        self.assertIn("is a symlink", self.tool("index.py", "status").stderr)
+        self.assertEqual("", self.hook("pre-compact").stdout)
+        os.unlink(self.index_file())
+        os.rename(moved, self.index_file())
+        self.assertIn("issues 7", self.tool("index.py", "status").stdout)
+        folder = os.path.join(self.data, "example-org__tinycsv")
+        os.rename(folder, folder + "-real")
+        os.symlink(folder + "-real", folder)
+        self.assertIn("is a symlink", self.tool("index.py", "status").stderr)
+        self.assertNotEqual(0, self.tool("index.py", "sync").returncode)
+
+    def test_state_file_is_never_written_through_a_symlink(self):
+        self.hook("session-start", session="s1")
+        state = os.path.join(self.data, "example-org__tinycsv", "prompt-state.json")
+        self.assertEqual(0o600, os.stat(state).st_mode & 0o777)
+        target = self.write("precious.txt", "keep me\n")
+        os.unlink(state)
+        os.symlink(target, state)
+        self.assertEqual("", self.hook("prompt-submit", session="s2").stdout)
+        self.assertEqual("keep me\n", ghim.read_text(target))
+        self.assertTrue(os.path.islink(state))
+
+    def test_a_malformed_since_value_means_a_full_sync(self):
+        self.tool("index.py", "sync")
+        self.set_meta(issues_since="2026-01-01T00:00:00Z&state=closed", comments_since="yesterday")
+        before = len(self.repo()["log"])
+        result = self.tool("index.py", "sync")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("7 issues, 6 comments", result.stdout)
+        calls = [" ".join(c) for c in self.repo()["log"][before:]]
+        listing = [c for c in calls if "issues?state=all" in c or "issues/comments?" in c]
+        self.assertEqual(2, len(listing))
+        self.assertFalse(any("since=" in c or "state=closed" in c or "yesterday" in c for c in listing), listing)
+
+    def test_a_stale_cached_resume_block_is_left_out(self):
+        self.hook("session-start")
+        self.set_meta(resume_read_at="2026-01-01T00:00:00Z")
+        cached = self.hook("session-start", gh="false").stdout
+        self.assertIn("cached, not refreshed", cached)
+        self.assertIn("Resume block: left out: the cached copy was read", cached)
+        self.assertNotIn("**Current focus:**", cached)
+        self.write_config(dict(self.config, resume_cache_days=100000))
+        self.assertIn("**Current focus:**", self.hook("session-start", gh="false").stdout)
+        fresh = self.hook("session-start").stdout  # a sync that works reads the block again
+        self.assertIn("**Current focus:**", fresh)
 
 
 class CompileTests(RecordSandbox):
