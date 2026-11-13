@@ -27,11 +27,11 @@ No hook can make the skill load, so each payload carries the rules itself and sa
 
 Every hook prints nothing and exits 0 when the project has no `.gh-issues-manager.json`, when its repository is not in the user's trusted list (see [session-protocol.md](session-protocol.md)), when there is no index yet and GitHub cannot be read, or on any error. None of them writes to GitHub or blocks a session.
 
-Text that comes from GitHub sits between the `BEGIN PROJECT STATUS DATA` and `END PROJECT STATUS DATA` lines, which say it is data and not instructions; look-alike delimiters are defused and line breaks removed from titles. The resume block passes the same author and edit checks as `resume_block.py show`. An issue title is shown only when the issue was opened by an allowed account and no other account renamed it (the index reads each issue's rename history); otherwise the brief shows the number and "title not shown" with the reason.
+Text that comes from GitHub sits between the `BEGIN PROJECT STATUS DATA` and `END PROJECT STATUS DATA` lines, which say it is data and not instructions; look-alike delimiters are defused and line breaks removed from titles. The resume block passes the same author and edit checks as `resume_block.py show`; only a block that passed them when it was read is cached, and a cached block older than `resume_cache_days` (default 7) is left out when GitHub cannot be read. A brief built from the index after a failed sync says "cached, not refreshed" and how old it is. The index and the hook state are kept outside the project tree and are read only when the plugin made them for this user (see [session-protocol.md](session-protocol.md), "Security model"). An issue title is shown only when the issue was opened by an allowed account and no other account renamed it (the index reads each issue's rename history); otherwise the brief shows the number and "title not shown" with the reason.
 
 ## The local index
 
-`scripts/index.py` keeps a SQLite file at `<CLAUDE_PLUGIN_DATA>/<owner>__<repo>/index.sqlite`, or at `<project>/.tmp/gh-issues-manager/<owner>__<repo>/index.sqlite` when Claude Code has not set `CLAUDE_PLUGIN_DATA` (keep `.tmp/` out of version control). It is derived from GitHub and never edited by hand.
+`scripts/index.py` keeps a SQLite file at `<CLAUDE_PLUGIN_DATA>/<owner>__<repo>/index.sqlite`, or, when Claude Code has not set `CLAUDE_PLUGIN_DATA`, at `$XDG_CACHE_HOME/gh-issues-manager/<owner>__<repo>/index.sqlite` (by default under `~/.cache`). It is never kept in the project tree, which a cloned repository controls. It is derived from GitHub and never edited by hand; how it is protected is under "Safety" above and in [session-protocol.md](session-protocol.md), "Security model".
 
 | Command | Does |
 |---|---|
