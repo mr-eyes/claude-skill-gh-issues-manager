@@ -2767,6 +2767,365 @@ class RecoveryTests(RecordSandbox):
         self.assertEqual(1, os.stat(target).st_nlink)
         self.assertFalse(os.path.lexists(lock + ".claim"))
 
+    def test_a_lock_replaced_after_it_was_read_is_not_removed(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)  # stale when it is read
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real = index_module.live_lock
+
+        def handed_over(data):
+            out = real(data)
+            index_module.hand_lock(REPO, os.getpid(), 300)  # as a hook does: a new file at the path, live
+            return out
+
+        index_module.live_lock = handed_over
+        try:
+            self.assertFalse(index_module.take_lock(REPO, 300))
+        finally:
+            index_module.live_lock = real
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_a_claim_made_by_another_process_is_left_alone(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real_live, real_link, claims = index_module.live_lock, index_module._link_new, []
+
+        def overtaken(data):
+            out = real_live(data)
+            if not os.path.exists(lock + ".other"):
+                # this claim was dropped as abandoned; another process removed the stale lock, a third took a
+                # new one, and a fourth now holds the claim on that new lock
+                os.unlink(lock + ".claim")
+                os.rename(lock, lock + ".other")
+                self.plant_lock(lock, pid=os.getpid())
+                os.link(lock, lock + ".claim")
+            return out
+
+        def link_new(path, record):
+            claims.append(os.path.lexists(lock + ".claim"))  # at the start of each attempt
+            return real_link(path, record)
+
+        index_module.live_lock, index_module._link_new = overtaken, link_new
+        try:
+            self.assertFalse(index_module.take_lock(REPO, 300))
+        finally:
+            index_module.live_lock, index_module._link_new = real_live, real_link
+        self.assertEqual([False, True], claims[:2])  # the other process's claim was still there after the first attempt
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
+    def test_a_stale_lock_removed_by_another_process_is_not_an_error(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        real, done = index_module._identity, []
+
+        def removed_meanwhile(path):
+            out = real(path)
+            if path == lock and out is not None and not done:
+                done.append(1)
+                os.unlink(lock)  # a second judge, after both dropped an abandoned claim, was faster
+            return out
+
+        index_module._identity = removed_meanwhile
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._identity = real
+        self.assertEqual([1], done)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
+    def test_a_claim_dropped_by_another_process_is_not_an_error(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        real, done = index_module._judge, []
+
+        def dropped_meanwhile(path):
+            if not done:
+                done.append(1)
+                os.unlink(lock + ".claim")  # a waiting process took this claim for an abandoned one
+            return real(path)
+
+        index_module._judge = dropped_meanwhile
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._judge = real
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
+    def test_a_stale_lock_is_removed_where_each_link_has_its_own_inode_number(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real_judge, real_identity = index_module._judge, index_module._identity
+
+        def other(identity):  # what such a file system reports for the claim link: another number than the lock's
+            return (identity[0], identity[1] + 1000000) + tuple(identity[2:])
+
+        def judge(path):
+            descriptor, identity, data = real_judge(path)
+            return descriptor, other(identity) if path.endswith(".claim") else identity, data
+
+        def identity(path):
+            out = real_identity(path)
+            return other(out) if out and path.endswith(".claim") else out
+
+        index_module._judge, index_module._identity = judge, identity
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._judge, index_module._identity = real_judge, real_identity
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_a_later_claim_on_the_same_lock_is_not_taken_for_the_one_that_was_seen(self):
+        import index as index_module
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock, pid=os.getpid())  # live, so nothing is removed and only the claim is watched
+        self.addCleanup(lambda: [os.unlink(p) for p in (claim, lock) if os.path.lexists(p)])  # before the sandbox cleanup
+        os.link(lock, claim)
+        real, naps = time.sleep, []
+
+        def sleep(seconds):
+            naps.append(seconds)
+            if len(naps) == 75:  # about a second and a half in: the claim goes and another process claims the lock
+                os.unlink(claim)
+                os.link(lock, claim)
+                stamp = time.time_ns()
+                os.utime(claim, ns=(stamp, stamp))
+            real(seconds)
+
+        time.sleep = sleep
+        try:
+            self.assertFalse(index_module.take_lock(REPO, 300))
+        finally:
+            time.sleep = real
+        self.assertGreater(len(naps), 75)
+        self.assertTrue(os.path.lexists(claim))  # seen for less than two seconds: not taken for a left claim
+
+    def test_a_judge_that_lost_its_claim_removes_nothing(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        real_judge, real_link, locks, done = index_module._judge, index_module._link_new, [], []
+
+        def dropped_meanwhile(path):
+            if not done:
+                done.append(1)
+                os.unlink(lock + ".claim")  # a waiting process took this claim for an abandoned one
+            return real_judge(path)
+
+        def link_new(path, record):
+            locks.append(os.path.lexists(lock))  # at the start of each attempt
+            return real_link(path, record)
+
+        index_module._judge, index_module._link_new = dropped_meanwhile, link_new
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._judge, index_module._link_new = real_judge, real_link
+        self.assertEqual([True, True, False], locks)  # the attempt without the claim left the stale lock there
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
+    def test_a_judge_that_lost_its_claim_before_it_looked_at_it_removes_nothing(self):
+        import index as index_module
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock)
+        real_identity, real_link, locks, done = index_module._identity, index_module._link_new, [], []
+
+        def identity(path):
+            if path == claim and not done:  # the first look at the claim is the one just after its stamp
+                done.append(1)
+                os.unlink(claim)  # a waiting process took this claim for an abandoned one
+            return real_identity(path)
+
+        def link_new(path, record):
+            locks.append(os.path.lexists(lock))  # at the start of each attempt
+            return real_link(path, record)
+
+        index_module._identity, index_module._link_new = identity, link_new
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._identity, index_module._link_new = real_identity, real_link
+        self.assertEqual([1], done)
+        self.assertEqual([True, True, False], locks)  # the attempt that did not know its claim left the lock there
+        self.assertFalse(os.path.lexists(claim))
+
+    def test_a_claim_is_told_apart_from_the_lock_seen_before_it(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        os.utime(lock, ns=(10 ** 9, 10 ** 9))  # an old time stamp, so a new one differs on any file system
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        before, real, seen = index_module._identity(lock), index_module._judge, []
+
+        def judge(path):
+            seen.append(index_module._identity(lock + ".claim"))  # what a process waiting on the claim sees now
+            return real(path)
+
+        index_module._judge = judge
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._judge = real
+        self.assertEqual(before[:2], seen[0][:2])  # the same file
+        self.assertNotEqual(before, seen[0])  # but another claim than a left one on that file
+
+    def test_a_claim_removed_before_it_is_stamped_is_not_an_error(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        real, done = os.utime, []
+
+        def utime(path, *args, **kw):
+            if path == lock + ".claim" and not done:
+                done.append(1)
+                os.unlink(path)  # a waiting process took this claim for an abandoned one
+            return real(path, *args, **kw)
+
+        os.utime = utime
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            os.utime = real
+        self.assertEqual([1], done)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_a_claim_that_cannot_be_stamped_is_dropped(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real = os.utime
+
+        def utime(path, *args, **kw):
+            if path == lock + ".claim":
+                raise PermissionError(1, "Operation not permitted", path)
+            return real(path, *args, **kw)
+
+        os.utime = utime
+        try:
+            with self.assertRaises(storage_module.StorageError) as caught:
+                index_module.take_lock(REPO, 300)
+        finally:
+            os.utime = real
+        self.assertEqual("lock", caught.exception.kind)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+
+    def test_a_stale_lock_that_is_never_matched_is_an_error_and_stays(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real, calls = index_module._judge, []
+
+        def never_the_same(path):  # a file system whose numbers cannot be compared at all
+            calls.append(1)
+            descriptor, identity, data = real(path)
+            return descriptor, (identity[0], identity[1] + 1000000) + tuple(identity[2:]), data
+
+        index_module._judge = never_the_same
+        try:
+            with self.assertRaises(storage_module.StorageError) as caught:
+                index_module.take_lock(REPO, 300)
+        finally:
+            index_module._judge = real
+        self.assertEqual("lock", caught.exception.kind)
+        self.assertEqual(index_module.LOCK_JUDGED, len(calls))
+        self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_the_waits_of_the_lock_are_measured_on_the_monotonic_clock(self):
+        import types
+        import index as index_module
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock, pid=os.getpid())  # live: only the wait on the claim matters
+        self.addCleanup(lambda: [os.unlink(p) for p in (claim, lock) if os.path.lexists(p)])  # before the sandbox cleanup
+        os.link(lock, claim)  # left by a judge that died
+        wall, naps, drops = [time.time()], [], []
+        real_drop = index_module._drop_claim
+
+        def wall_clock():  # a wall clock that is set forward by a second at every reading
+            wall[0] += 1.0
+            return wall[0]
+
+        def sleep(seconds):  # nothing waits: the monotonic clock moves with the naps only
+            naps.append(seconds)
+            if len(naps) > 1000:
+                raise AssertionError("take_lock went on waiting")
+
+        def drop(path, identity):
+            drops.append(len(naps))
+            return real_drop(path, identity)
+
+        index_module.time = types.SimpleNamespace(time=wall_clock, sleep=sleep, time_ns=time.time_ns,
+                                                  monotonic=lambda: 0.02 * len(naps))
+        index_module._drop_claim = drop
+        try:
+            self.assertFalse(index_module.take_lock(REPO, 300))
+        finally:
+            index_module.time, index_module._drop_claim = time, real_drop
+        self.assertTrue(drops, naps)
+        self.assertGreaterEqual(drops[0], 99)  # the left claim stood for two seconds of naps, whatever the wall clock did
+        self.assertFalse(os.path.lexists(claim))
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
+    def test_a_claim_that_is_not_a_file_is_refused_at_once(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        for make, remove in ((os.mkdir, os.rmdir), (os.mkfifo, os.unlink)):
+            make(claim, 0o700)
+            with self.assertRaises(storage_module.StorageError, msg=make.__name__) as caught:
+                index_module.take_lock(REPO, 300)
+            self.assertEqual("not-folder", caught.exception.kind, make.__name__)
+            self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+            remove(claim)
+
+    def test_a_platform_without_linkat_gives_a_lock_error(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real = os.link
+
+        def link(source, target, *args, follow_symlinks=True, **kw):
+            if not follow_symlinks:
+                raise NotImplementedError("link: follow_symlinks unavailable on this platform")
+            return real(source, target, *args, **kw)
+
+        os.link = link
+        try:
+            with self.assertRaises(storage_module.StorageError) as caught:
+                index_module.take_lock(REPO, 300)
+        finally:
+            os.link = real
+        self.assertEqual("lock", caught.exception.kind)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
     def test_lock_fields_and_hosts(self):
         import index as index_module
         now = time.time()

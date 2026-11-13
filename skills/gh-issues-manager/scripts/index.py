@@ -631,14 +631,15 @@ LOCK_JUDGED = 40   # and at most this many judgments of a lock that is there
 CLAIM_LEFT = 2.0   # seconds a claim may stand before it counts as left behind by a process that died
 
 
-def _judge(claim):
-    """(descriptor, (device, inode), fields) of the lock read through the claim link `claim`, by one descriptor that
-    the caller closes. The fields are None when the text is not a lock record."""
-    descriptor = os.open(claim, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+def _judge(path):
+    """(descriptor, (device, inode, time stamp), fields) of the lock read through `path`, by one descriptor that the
+    caller keeps open until it is done with the lock and then closes. The fields are None when the text is not a lock
+    record."""
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISREG(info.st_mode):
-            raise storage.StorageError("%s is not a file" % claim, "not-folder")
+            raise storage.StorageError("%s is not a file" % path, "not-folder")
         text = os.read(descriptor, 4096)
     except BaseException:
         os.close(descriptor)
@@ -647,20 +648,32 @@ def _judge(claim):
         data = json.loads(text.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         data = None
-    return descriptor, (info.st_dev, info.st_ino), data
+    return descriptor, (info.st_dev, info.st_ino, info.st_mtime_ns), data
 
 
 def _identity(path):
+    """(device, inode, time stamp) of `path` itself, or None when nothing is there. The time stamp tells a claim made
+    later on the same file from the one seen before."""
     try:
         info = os.lstat(path)
     except FileNotFoundError:
         return None
-    return info.st_dev, info.st_ino
+    return info.st_dev, info.st_ino, info.st_mtime_ns
+
+
+def claim_not_a_file(claim):
+    """True when something at `claim` is neither a regular file nor a symlink, such as a folder: no judge made it,
+    and no judge could remove it."""
+    try:
+        mode = os.lstat(claim).st_mode
+    except FileNotFoundError:
+        return False
+    return not (stat.S_ISREG(mode) or stat.S_ISLNK(mode))
 
 
 def _drop_claim(claim, identity):
-    """Remove the claim link while it is still the file `identity` names; a claim made since by another process
-    stays."""
+    """Remove the claim link while it is still the claim `identity` names (device, inode and time stamp); a claim
+    made since by another process, which carries a later time stamp, stays."""
     if _identity(claim) == identity:
         try:
             os.unlink(claim)
@@ -679,36 +692,44 @@ def take_lock(repo, budget):
     """Take the sync lock of `repo`; True only when this process holds it afterwards.
 
     The lock appears whole in one step (a temporary file linked into place). A
-    lock that is there already is judged through a claim: a hard link
-    sync.lock.claim to the lock file, which only one process can make at a time.
-    The process that holds the claim reads the lock through it, and removes the
-    lock only when it is stale and the path still names the file it read (same
-    device and inode). While the claim and the open descriptor exist, that inode
-    cannot be freed and given to a new lock, so a fresh lock is never taken for
-    the stale one. No lock is renamed away. A claim that stands for about two
-    seconds was left by a process that died, and is removed. A symlinked or
+    lock that is there already is judged by one process at a time, the one that
+    made the claim: a hard link sync.lock.claim to the lock file, which only one
+    process can make at a time. The judge gives the claimed file a new time stamp
+    at once, so a process that waits on a claim, or that read the lock before,
+    sees that this is another claim than the one it saw. It then reads the lock
+    through its path, keeps that descriptor open until the lock is removed, and
+    removes the lock only when it is stale, the path still names the file it read
+    (same device, inode and time stamp) and it still holds its claim. An open
+    file cannot be freed and its inode given to a new lock, so a fresh lock is
+    never taken for the stale one. No lock is renamed away. A claim that stands
+    unchanged for about two seconds was left by a process that died, and is
+    removed; a claim that is neither a file nor a symlink is refused at once
+    (kind "not-folder"). The time limits use the monotonic clock. A symlinked or
     foreign lock is refused. Errors of the file system are reported as
-    storage.StorageError of kind "lock".
+    storage.StorageError of kind "lock", and so is a stale lock that LOCK_JUDGED
+    judgments did not remove.
     """
     path = background_files(repo)["lock"]
     claim = path + ".claim"
     budget = int(min(LOCK_MAX, max(1, budget)))
-    end = time.time() + LOCK_TRY
+    end = time.monotonic() + LOCK_TRY
     judged, waiting = 0, None  # waiting: (identity of the claim seen, since when)
     try:
-        while judged < LOCK_JUDGED and time.time() < end:
+        while judged < LOCK_JUDGED and time.monotonic() < end:
             if _link_new(path, lock_record(os.getpid(), budget)):
                 return _holds(path)
             storage.check_path(path, "file")
             try:
-                os.link(path, claim, follow_symlinks=False)  # one judge at a time; pins the judged file's inode
+                os.link(path, claim, follow_symlinks=False)  # one judge at a time
             except FileExistsError:
                 seen = _identity(claim)
                 if seen is None:
                     continue  # the other process is done
                 if waiting is None or waiting[0] != seen:
-                    waiting = (seen, time.time())
-                elif time.time() - waiting[1] >= CLAIM_LEFT:
+                    if claim_not_a_file(claim):
+                        raise storage.StorageError("%s is not a file" % claim, "not-folder")
+                    waiting = (seen, time.monotonic())
+                elif time.monotonic() - waiting[1] >= CLAIM_LEFT:
                     _drop_claim(claim, seen)  # its process died while it held the claim
                     waiting = None
                     continue
@@ -717,21 +738,37 @@ def take_lock(repo, budget):
             except FileNotFoundError:
                 continue  # the lock went away: try to link a new one
             waiting, judged = None, judged + 1
-            descriptor, identity = None, None
             try:
-                descriptor, identity, data = _judge(claim)
+                # A new time stamp on the claimed file, at once: a process that waits on a claim, or that read the
+                # lock before, sees that this is another claim than the one it saw.
+                stamp = time.time_ns()
+                os.utime(claim, ns=(stamp, stamp), follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # a waiting process took this claim for an abandoned one and removed it: go around again
+            except BaseException:
+                _drop_claim(claim, _identity(claim))  # the claim this process made, which it could not stamp
+                raise
+            mine, descriptor = _identity(claim), None
+            try:
+                # Read through the path, and keep the descriptor open until the lock is removed: an open file's
+                # inode cannot be given to a new lock, and the path is compared with what was read by the same name.
+                descriptor, identity, data = _judge(path)
                 if live_lock(data):
                     return False
-                if _identity(path) == identity:
-                    os.unlink(path)  # still the stale file that was read: the claim keeps its inode from reuse
+                if mine is not None and _identity(path) == identity and _identity(claim) == mine:
+                    os.unlink(path)  # still the stale file that was read, and this process still holds the claim
+            except FileNotFoundError:
+                pass  # the lock went away, or another process removed it first: go around again
             finally:
                 if descriptor is not None:
                     os.close(descriptor)
-                _drop_claim(claim, identity or _identity(claim))
+                _drop_claim(claim, mine)
+        if judged >= LOCK_JUDGED:
+            raise storage.StorageError("the stale sync lock at %s could not be removed" % path, "lock")
         return False
     except storage.StorageError:
         raise
-    except OSError as error:
+    except (OSError, NotImplementedError) as error:  # NotImplementedError: no linkat on this platform
         raise storage.StorageError("the sync lock at %s could not be taken: %s" % (path, error), "lock")
 
 
