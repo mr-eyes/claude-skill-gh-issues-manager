@@ -38,10 +38,10 @@ HISTORY_HEADING = re.compile(
     r"^(?:decisions?|decision (?:record|log|table)|open (?:work|questions|items)|provenance"
     r"|next(?: (?:steps?|actions?|work))?|current state|not established|code and evidence|related topics"
     r"|history|status)\s*$", re.I)
-DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+DATE = re.compile(r"\b[0-9]{4}-[0-9]{2}-[0-9]{2}\b")
 # "As of" followed by a date, a month or a year, at the start of a line or of a list item.
-AS_OF = re.compile(r"^\s*(?:(?:[-*+]|\d+\.)\s+)?[*_]*as of\s+[*_]*"
-                   r"(?:the\s+)?(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:(?:19|20)\d{2}\b|\d{1,2}[/.]\d|(?:jan(?:uary)?"
+AS_OF = re.compile(r"^\s*(?:(?:[-*+]|[0-9]+\.)\s+)?[*_]*as of\s+[*_]*"
+                   r"(?:the\s+)?(?:[0-9]{1,2}(?:st|nd|rd|th)?\s+)?(?:(?:19|20)[0-9]{2}\b|[0-9]{1,2}[/.][0-9]|(?:jan(?:uary)?"
                    r"|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?"
                    r"|nov(?:ember)?|dec(?:ember)?)\b)", re.I)
 
@@ -156,7 +156,7 @@ SECRET_PATTERNS = [
     ("API key", r"\bsk-[A-Za-z0-9_-]{32,}"),
 ]
 
-BARE_REF = re.compile(r"(?<![\w/&#])#(\d+)\b")
+BARE_REF = re.compile(r"(?<![\w/&#])#([0-9]+)\b")
 TEMPLATE_FIELD = re.compile(r"\{\{[^{}\n]*\}\}")
 FENCE = re.compile(r"^\s*(```+|~~~+)(.*)$")
 
@@ -615,7 +615,7 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
     if kind == "pointer":
         if length > 1000:
             add("error", "pointer-length", 0, "a pointer comment stays short (at most 1000 characters)")
-        if "https://github.com/" not in text and not re.search(r"[\w.-]+/[\w.-]+#\d+", text) \
+        if "https://github.com/" not in text and not re.search(r"[\w.-]+/[\w.-]+#[0-9]+", text) \
                 and not (allow_placeholders and ghim.PLACEHOLDER_RE.search(text)):
             add("error", "pointer-link", 0, "a pointer comment must link to the new home with a full reference")
 

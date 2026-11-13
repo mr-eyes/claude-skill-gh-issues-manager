@@ -660,7 +660,7 @@ def apply(answers, root, dry, drafts):
         out = run([python, os.path.join(scripts, "create_issues.py"), "--manifest", os.path.join(drafts, "manifest.json"),
                    "--repo", answers["repo"]], dry, "create and pin the hub, post the first resume comment", cwd=root)
         if not dry:
-            match = re.search(r"NEW-hub -> #(\d+)", out)
+            match = re.search(r"NEW-hub -> #([0-9]+)", out)
             if not match:
                 raise SystemExit("error: the hub number was not found in the output of create_issues.py")
             config["hub"] = int(match.group(1))

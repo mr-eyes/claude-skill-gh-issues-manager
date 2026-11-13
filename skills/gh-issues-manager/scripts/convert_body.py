@@ -229,7 +229,7 @@ def main(argv=None):
         if found:
             # Adopted, possibly in another layout: read it back and check that it still keeps this former body.
             url = found[0][0]["html_url"]
-            match = re.search(r"#issuecomment-(\d+)", url)
+            match = re.search(r"#issuecomment-([0-9]+)", url)
             parts = split_record(ghim.read_comment_body(repo, match.group(1))) if match else None
             if not parts or parts[1] != ghim.normalize(live.replace("\r\n", "\n").replace("\r", "\n").strip("\n")):
                 print("stopped: the adopted record comment %s no longer keeps the former body; the body was not "
@@ -240,7 +240,7 @@ def main(argv=None):
             url = ghim.gh(["issue", "comment", str(args.issue), "--repo", repo, "--body-file", "-"],
                           stdin=comment).strip().split("\n")[-1]
             print("posted: %s" % url)
-            match = re.search(r"#issuecomment-(\d+)", url)
+            match = re.search(r"#issuecomment-([0-9]+)", url)
             if not match or not ghim.verify_body(comment, ghim.read_comment_body(repo, match.group(1)),
                                                  "record comment %s" % url):
                 print("stopped: the record comment did not read back; the body was not replaced")

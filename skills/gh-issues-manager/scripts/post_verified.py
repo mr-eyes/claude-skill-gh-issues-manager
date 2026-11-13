@@ -105,7 +105,7 @@ def main(argv=None):
             return 0
         url = ghim.gh(command).strip().split("\n")[-1]
         print("posted: %s" % url)
-        match = re.search(r"#issuecomment-(\d+)", url)
+        match = re.search(r"#issuecomment-([0-9]+)", url)
         if not match:
             print("MISMATCH: could not find the comment id in gh output, so the comment was not read back")
             return 1

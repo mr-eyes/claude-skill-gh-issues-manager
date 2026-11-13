@@ -2160,13 +2160,21 @@ class GuardTests(RecordSandbox):
             ("lint STAMP", lambda t: bool(re.fullmatch(lint_drafts.STAMP, t)), "2026-03-05 09:00 UTC+1", True, False),
             ("heading time", index_module.to_iso, "2026-03-05 09:00 UTC", "2026-03-05T09:00Z", None),
             ("MENTION", lambda t: [m[0] for m in record_format.MENTION.findall(t)], "see #12", ["12"], []),
-            ("PULL", lambda t: record_format.PULL.findall(t), "pull request #12, /pull/13", [("12", ""), ("", "13")], []),
+            ("PULL", lambda t: record_format.PULL.findall(t), "pull request #12", [("12", "")], []),
+            ("PULL link", lambda t: record_format.PULL.findall(t), "see /pull/13", [("", "13")], []),
             ("issue_url", comment_issue, "https://api.github.com/repos/example-org/tinycsv/issues/12", 12, None),
             ("hub table", hub_table_first, "#12", "rel:known-issues", "rel:changed"),
         ]
         for what, function, text, ascii_value, other in cases:
             self.assertEqual(ascii_value, function(text), what)
             self.assertEqual(other, function(text.translate(arabic)), what)
+            # One digit in another script at a time, so a single ASCII class left in a pattern cannot hide another.
+            digits = [i for i, c in enumerate(text) if c.isdigit()]
+            first, last = (text[:i] + text[i].translate(arabic) + text[i + 1:] for i in (digits[0], digits[-1]))
+            self.assertEqual(other, function(first), (what, first))
+            value = function(last)  # a pattern may stop before the last digit, but never reads it as a digit
+            self.assertNotEqual(ascii_value, value, (what, last))
+            self.assertTrue(str(value).isascii(), (what, last, value))
         late = "2026-03-05T17:00:00Z\n"  # a final newline
         self.assertIsNone(index_module.newest_of(None, late))
         self.assertIsNone(stored_since(late))
@@ -2181,6 +2189,15 @@ class GuardTests(RecordSandbox):
         self.ready()
         self.meta(synced_at=late)
         self.assertIn("synced: unknown (", self.tool("index.py", "status").stdout)
+
+    def test_no_script_uses_the_digit_class_of_every_script(self):
+        found = []  # \d takes the digits of every script, and int() reads them; the scripts write [0-9]
+        for name in sorted(os.listdir(SCRIPTS)):
+            if name.endswith(".py"):
+                for number, line in enumerate(ghim.read_text(os.path.join(SCRIPTS, name)).split("\n"), 1):
+                    if "\\d" in line:
+                        found.append("%s:%d" % (name, number))
+        self.assertEqual([], found)
 
     def test_the_link_and_time_of_a_resume_comment_are_shown_only_in_ascii(self):
         import contextlib

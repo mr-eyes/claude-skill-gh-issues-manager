@@ -69,7 +69,7 @@ def show(args, config):
         return 0
 
     url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) else "(not shown)"
-    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
+    created = chosen["created"] if re.fullmatch(r"[0-9T:Z-]+", chosen["created"], re.ASCII) else "unknown"
     lines = [
         BEGIN,
         "Source: newest usable resume comment on hub issue %s, %s" % (where, url),
@@ -154,7 +154,7 @@ def update(args, config):
         return 0
     url = ghim.gh(command, stdin=comment).strip().split("\n")[-1]
     print("posted: %s" % url)
-    match = re.search(r"#issuecomment-(\d+)", url)
+    match = re.search(r"#issuecomment-([0-9]+)", url)
     if not match:
         print("MISMATCH: could not find the comment id in gh output, so the comment was not read back")
         return 1

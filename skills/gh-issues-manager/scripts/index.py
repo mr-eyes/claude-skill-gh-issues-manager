@@ -877,7 +877,7 @@ def read_resume(db, repo, hub, timeout):
     else:
         url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) \
             else "(link not shown)"
-        created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
+        created = chosen["created"] if re.fullmatch(r"[0-9T:Z-]+", chosen["created"], re.ASCII) else "unknown"
         # Only a block that passed the trust, author and never-edited checks just now is kept.
         values = {"resume": ghim.extract_resume_block(chosen["body"]).strip(), "resume_read_at": now_utc(),
                   "resume_note": "newest usable resume comment on hub %s, posted %s (UTC) by %s, never edited, %s"

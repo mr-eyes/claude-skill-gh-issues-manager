@@ -88,7 +88,7 @@ def main(argv=None):
     comments = ghim.parse_json_stream(ghim.gh(comment_call, timeout=args.timeout))
     by_issue = {}
     for comment in comments:
-        match = re.search(r"/issues/(\d+)$", comment.get("issue_url", ""))
+        match = re.search(r"/issues/([0-9]+)$", comment.get("issue_url", ""))
         if match:
             by_issue.setdefault(int(match.group(1)), []).append(comment)
     for group in by_issue.values():

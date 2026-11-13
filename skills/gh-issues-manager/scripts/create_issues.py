@@ -56,14 +56,14 @@ def save_state(path, state):
 
 
 def number_from_url(url):
-    match = re.search(r"/(?:issues|pull)/(\d+)", url)
+    match = re.search(r"/(?:issues|pull)/([0-9]+)", url)
     if not match:
         raise ghim.GhError("could not read an issue number from gh output: %r" % url)
     return int(match.group(1))
 
 
 def comment_id_from_url(url):
-    match = re.search(r"#issuecomment-(\d+)", url)
+    match = re.search(r"#issuecomment-([0-9]+)", url)
     if not match:
         raise ghim.GhError("could not read a comment id from gh output: %r" % url)
     return match.group(1)
