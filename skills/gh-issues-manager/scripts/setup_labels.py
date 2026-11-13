@@ -22,16 +22,18 @@ import ghim  # noqa: E402
 TOPIC_COLOR = "0e8a16"
 
 
-def load_profile(name):
+def load_profile(name, shipped_only=True):
     try:
-        return ghim.load_profile(name)
+        return ghim.load_profile(name, shipped_only=shipped_only)
     except ValueError as error:
         sys.exit("error: %s" % error)
 
 
-def wanted_labels(profiles, topics):
+def wanted_labels(profiles, topics, shipped_only=True):
     """Labels of core and the given profiles. A profile entry with sections chosen at setup brings its own section
-    labels in place of the profile's default ones, plus the profile's other labels (its issue types)."""
+    labels in place of the profile's default ones, plus the profile's other labels (its issue types). Profiles named
+    in a project's setup are shipped profiles only; a profile file by path is read only when the user names it with
+    --profile (shipped_only=False)."""
     labels, seen = [], set()
     entries = ["core"] + [p for p in profiles if p != "core"]
     for entry in entries:
@@ -47,7 +49,7 @@ def wanted_labels(profiles, topics):
                    for label, heading in parsed[1]]
             own += [l for l in profile["labels"] if not l.get("heading")]
         else:
-            own = load_profile(entry)["labels"]
+            own = load_profile(entry, shipped_only=shipped_only)["labels"]
         for label in own:
             if label["name"] not in seen:
                 seen.add(label["name"])
@@ -82,7 +84,7 @@ def main(argv=None):
     profiles = [p.strip() for p in args.profile.split(",") if p.strip()] if args.profile else \
         list(config.get("profiles") or [])
     topics = args.topic or config.get("topics", [])
-    labels = wanted_labels(profiles, topics)
+    labels = wanted_labels(profiles, topics, shipped_only=not args.profile)
 
     if args.existing:
         existing_list = json.loads(ghim.read_text(args.existing))

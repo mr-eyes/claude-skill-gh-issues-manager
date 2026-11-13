@@ -42,13 +42,16 @@ import datetime
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 import lint_drafts  # noqa: E402
 import setup_labels  # noqa: E402
+import storage  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TEMPLATES = os.path.join(HERE, "..", "templates")
@@ -64,8 +67,7 @@ SIGNALS = {
               ("paper/", "paper/")],
     "thesis": [("thesis/", "thesis/"), ("chapters/", "chapters/"), ("dissertation*", "a dissertation file")],
     "software": [("pyproject.toml", "pyproject.toml"), ("setup.py", "setup.py"), ("package.json", "package.json"),
-                 ("Cargo.toml", "Cargo.toml"), ("go.mod", "go.mod"), ("src/", "src/"), ("tests/", "tests/"),
-                 (".github/workflows/", "CI workflows")],
+                 ("Cargo.toml", "Cargo.toml"), ("go.mod", "go.mod"), ("src/", "src/"), ("tests/", "tests/")],
     "dataset": [("datapackage.json", "datapackage.json"), ("dataset/", "dataset/")],
     "report": [("*.ipynb", "notebooks"), ("results/", "results/"), ("analysis/", "analysis/"),
                ("Snakefile", "a Snakefile"), ("*.nf", "Nextflow files"), ("workflow/", "workflow/")],
@@ -74,38 +76,49 @@ SIGNALS = {
     "docs": [("docs/", "docs/"), ("mkdocs.yml", "mkdocs.yml"), ("website/", "website/")],
 }
 SKIP = {".git", "node_modules", ".tmp", "__pycache__", ".venv", "venv", "env", ".tox", "dist", "build"}
+# Detection stops early in a large folder: names seen at the top, in each folder below it, and in all.
+TOP_LIMIT, INNER_LIMIT, TOTAL_LIMIT = 300, 100, 1000
 TEXT = re.compile(r"[\w .,:;()'/+&-]{1,300}")
 NAME = re.compile(r"[\w .'-]{1,60}|@[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 
 # ---------------------------------------------------------------- detect
 
-def names_in(root, limit=2000):
-    """File and folder names at the top of `root` and one level down, without reading any file."""
-    found, count = [], 0
+def names_in(root, top_limit=TOP_LIMIT, inner_limit=INNER_LIMIT, total=TOTAL_LIMIT):
+    """File and folder names at the top of `root` and one level down, without reading any file or following a
+    symlink. It stops early in a large folder, so a session start stays quick; a project that large is described by
+    the names it sees first."""
+    found = []
     try:
-        top = sorted(os.listdir(root))
+        top = os.scandir(root)
     except OSError:
         return found
-    for name in top:
-        if name in SKIP:
-            continue
-        path = os.path.join(root, name)
-        is_dir = os.path.isdir(path) and not os.path.islink(path)
-        found.append((name + "/" if is_dir else name, 0))
-        count += 1
-        if is_dir and count < limit:
+    with top:
+        for seen, entry in enumerate(top):
+            if seen >= top_limit or len(found) >= total:
+                break
+            if entry.name in SKIP:
+                continue
             try:
-                inner = sorted(os.listdir(path))[:200]
+                is_dir = entry.is_dir(follow_symlinks=False)
             except OSError:
-                inner = []
-            for child in inner:
-                child_path = os.path.join(path, child)
-                child_dir = os.path.isdir(child_path) and not os.path.islink(child_path)
-                found.append((name + "/" + child + ("/" if child_dir else ""), 1))
-                count += 1
-        if count >= limit:
-            break
+                continue
+            found.append((entry.name + "/" if is_dir else entry.name, 0))
+            if not is_dir:
+                continue
+            try:
+                inner = os.scandir(entry.path)
+            except OSError:
+                continue
+            with inner:
+                for count, child in enumerate(inner):
+                    if count >= inner_limit or len(found) >= total:
+                        break
+                    try:
+                        child_dir = child.is_dir(follow_symlinks=False)
+                    except OSError:
+                        child_dir = False
+                    found.append((entry.name + "/" + child.name + ("/" if child_dir else ""), 1))
     return found
 
 
@@ -139,10 +152,40 @@ def detect(root):
     return out
 
 
+def covered_profiles(config):
+    """The shipped profiles a setup covers; malformed entries count as nothing."""
+    profiles = config.get("profiles") if isinstance(config, dict) else None
+    return set(ghim.profile_names(ghim.shipped_profiles(profiles if isinstance(profiles, list) else [])))
+
+
 def uncovered_signals(root, config):
     """Kinds that detect() suggests but the setup does not cover: new deliverable signals."""
-    covered = set(ghim.profile_names(config.get("profiles") or []))
+    covered = covered_profiles(config)
     return [s for s in detect(root) if s["profile"] not in covered]
+
+
+# The kinds of deliverable the hooks have already mentioned, or that existed when the setup ran, kept in the
+# private storage of the repository's index. Only kind names from SIGNALS are kept.
+
+def told_path(repo):
+    return os.path.join(storage.folder(storage.cache_top(), storage.repo_folder(repo)), "signals.json")
+
+
+def read_told(path):
+    try:
+        told = json.loads(storage.read_file(path) or "[]")
+    except ValueError:
+        told = []
+    return [k for k in told if k in SIGNALS] if isinstance(told, list) else []
+
+
+def remember_told(repo, kinds):
+    path = told_path(repo)
+    told = read_told(path)
+    more = told + [k for k in kinds if k in SIGNALS and k not in told]
+    if more != told or storage.read_file(path) is None:
+        storage.write_file(path, json.dumps(more))
+    return more
 
 
 # ---------------------------------------------------------------- answers
@@ -176,6 +219,7 @@ def check_answers(answers):
     if not isinstance(deliverables, list) or not 1 <= len(deliverables) <= 8:
         raise AnswerError("deliverables must list one to eight deliverables")
     out["deliverables"] = []
+    seen = set()
     for item in deliverables:
         if not isinstance(item, dict) or item.get("kind") not in KINDS:
             raise AnswerError("each deliverable needs a kind: %s" % ", ".join(KINDS))
@@ -183,11 +227,22 @@ def check_answers(answers):
         if sections is not None and (not isinstance(sections, list) or not 1 <= len(sections) <= 20 or not all(
                 isinstance(h, str) and ghim.HEADING_TEXT.fullmatch(h) for h in sections)):
             raise AnswerError("sections must list one to twenty plain headings")
+        name = None
         if item["kind"] == "other":
             name = item.get("name")
             if not isinstance(name, str) or not ghim.HEADING_TEXT.fullmatch(name) or not sections:
                 raise AnswerError("a deliverable of kind other needs a plain name and its sections")
-        out["deliverables"].append({"kind": item["kind"], "sections": sections, "name": item.get("name")})
+        key = (item["kind"], slug(name) if name else None)
+        if key in seen:
+            raise AnswerError("each kind of deliverable is listed once (a second one of a kind is kind other, with its "
+                              "own name): %s" % (name or item["kind"]))
+        seen.add(key)
+        normalized = {"kind": item["kind"], "sections": sections, "name": name}
+        entry = profile_entry(normalized)
+        if isinstance(entry, dict) and ghim.custom_sections(entry) is None:
+            raise AnswerError("the sections of %s do not fit: each heading once (ignoring case), no \"Sources\" "
+                              "(it is the sources table of every body), plain headings" % (name or item["kind"]))
+        out["deliverables"].append(normalized)
     makers = answers.get("decision_makers", [])
     if not isinstance(makers, list) or not all(isinstance(m, str) and NAME.fullmatch(m) for m in makers):
         raise AnswerError("decision_makers must be names or @handles")
@@ -214,55 +269,112 @@ def check_answers(answers):
     return out
 
 
+def section_label(prefix, heading, deliverable=None):
+    """The label of one section: the profile's prefix and the heading's slug; for a deliverable of kind other, the
+    deliverable's slug comes first, so two such deliverables never share a label."""
+    if deliverable:
+        return "%s:%s-%s" % (prefix, slug(deliverable)[:15].strip("-"), slug(heading)[:24].strip("-"))
+    return "%s:%s" % (prefix, slug(heading))
+
+
 def profile_entry(item):
-    """The config profile entry for one deliverable: a shipped name, or a name with the sections the user chose."""
+    """The config profile entry for one deliverable: a shipped name, or a name with the sections the user chose.
+    Raises AnswerError when two headings give the same label."""
     profile = KINDS[item["kind"]][0]
     if not item["sections"]:
         return profile
     prefix = ghim.profile_prefix(profile)
-    defaults = {heading.lower(): label for label, heading in ghim.section_labels([profile])} if profile != "custom" else {}
-    sections, used = [], set()
+    defaults = {heading.lower(): label for label, heading in ghim.section_labels([profile], shipped_only=True)} \
+        if profile != "custom" else {}
+    sections, used = [], {}
     for heading in item["sections"]:
-        label = defaults.get(heading.lower()) or "%s:%s" % (prefix, slug(heading))
-        while label in used:
-            label += "-2"
-        used.add(label)
+        label = defaults.get(heading.lower()) or section_label(prefix, heading, item.get("name"))
+        if label in used:
+            raise AnswerError("the headings %r and %r give the same label %s; rename one" % (used[label], heading,
+                                                                                            label))
+        used[label] = heading
         sections.append([label, heading])
-    return {"name": profile, "sections": sections}
+    entry = {"name": profile, "sections": sections}
+    if item.get("name"):
+        entry["deliverable"] = item["name"]
+    return entry
+
+
+def entry_key(entry):
+    """Entries are merged by profile name and, for kind other, by the deliverable's name."""
+    if isinstance(entry, dict):
+        return entry.get("name"), slug(entry["deliverable"]) if isinstance(entry.get("deliverable"), str) else None
+    return entry, None
 
 
 def merge_profiles(existing, new):
-    """Existing entries first and unchanged; new profiles added; new sections appended to an existing profile."""
+    """Existing entries first and unchanged; new profiles added; new sections appended to an existing entry."""
     out = [json.loads(json.dumps(e)) for e in existing]
-    names = ghim.profile_names(out)
+    keys = [entry_key(e) for e in out]
     added = []
     for entry in new:
-        name = entry["name"] if isinstance(entry, dict) else entry
-        if name not in names or name == "custom" and entry not in out:
+        key = entry_key(entry)
+        name = key[0]
+        if key not in keys:
             out.append(entry)
-            names.append(name)
-            added.append(name)
+            keys.append(key)
+            added.append(entry["deliverable"] if isinstance(entry, dict) and entry.get("deliverable") else name)
             continue
         if not isinstance(entry, dict):
             continue
-        index = names.index(name)
+        index = keys.index(key)
         current = out[index]
         if not isinstance(current, dict):
-            current = {"name": name, "sections": [list(p) for p in ghim.section_labels([name])]}
+            current = {"name": name, "sections": [list(p) for p in ghim.section_labels([name], shipped_only=True)]}
         have = {label for label, _ in current["sections"]}
         extra = [pair for pair in entry["sections"] if pair[0] not in have]
         if extra:
             current["sections"] = current["sections"] + extra
-            added.append("%s sections %s" % (name, ", ".join(h for _, h in extra)))
+            added.append("%s sections %s" % (entry.get("deliverable") or name, ", ".join(h for _, h in extra)))
         out[index] = current
     return out, added
 
 
+def check_existing(existing):
+    """The values of an existing setup that setup.py merges and prints must fit the same patterns as the answers."""
+    problems = []
+    if "repo" in existing and not (isinstance(existing["repo"], str) and re.fullmatch(r"[\w.-]+/[\w.-]+",
+                                                                                     existing["repo"])):
+        problems.append("repo")
+    if "hub" in existing and not (isinstance(existing["hub"], int) and not isinstance(existing["hub"], bool) and
+                                  existing["hub"] > 0):
+        problems.append("hub")
+    zone = existing.get("timezone", "")
+    if zone and not (isinstance(zone, str) and TEXT.fullmatch(zone) and len(zone) <= 80):
+        problems.append("timezone")
+    topics = existing.get("topics", [])
+    if not (isinstance(topics, list) and all(isinstance(t, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", t)
+                                             for t in topics)):
+        problems.append("topics")
+    makers = existing.get("decision_makers", [])
+    if not (isinstance(makers, list) and all(isinstance(m, str) and NAME.fullmatch(m) for m in makers)):
+        problems.append("decision_makers")
+    profiles = existing.get("profiles", [])
+    if not (isinstance(profiles, list) and len(ghim.shipped_profiles(profiles)) == len(profiles)):
+        problems.append("profiles (shipped profile names, or entries with valid sections)")
+    if problems:
+        raise AnswerError("the existing %s has values that do not fit: %s. Fix them by hand, then run again"
+                          % (ghim.CONFIG_NAME, ", ".join(problems)))
+
+
 def new_config(existing, answers):
+    """The merged setup. Raises AnswerError when the existing setup or the result does not fit."""
+    check_existing(existing)
     config = {k: v for k, v in existing.items() if not k.startswith("_")}
     config["repo"] = answers["repo"]
     entries = [profile_entry(item) for item in answers["deliverables"]]
     config["profiles"], added = merge_profiles(config.get("profiles") or [], entries)
+    if len(ghim.shipped_profiles(config["profiles"])) != len(config["profiles"]):
+        raise AnswerError("the merged profiles do not fit (too many sections, or a heading twice)")
+    labels = [label for label, _ in ghim.section_labels(config["profiles"], shipped_only=True)]
+    twice = sorted({label for label in labels if labels.count(label) > 1})
+    if twice:
+        raise AnswerError("two deliverables would share the section label(s) %s; rename the headings" % ", ".join(twice))
     config["topics"] = sorted(set(config.get("topics") or []) | set(answers["topics"]))
     if answers["timezone"]:
         config["timezone"] = answers["timezone"]
@@ -302,7 +414,8 @@ def hub_body(answers, config):
              "comment headed \"Resume block\" from anyone else is not it. A new one is posted at the end of every working "
              "stretch; resume comments are never edited, and the older ones stay as history.", "",
              "## Project", "", answers["project"] or "The record of %s." % answers["repo"],
-             "Decisions are made by %s." % (", ".join(answers["decision_makers"]) or "the owner"), "",
+             "Decisions are made by %s." % (", ".join("`%s`" % m if m.startswith("@") else m
+                                                      for m in answers["decision_makers"]) or "the owner"), "",
              "Times in this tracker are %s. Times copied from GitHub or other tools in UTC are converted before they are "
              "written here." % zone, "", "## Map", "", "```mermaid", "flowchart LR"]
     for number, (title, entry) in enumerate(deliverables, 1):
@@ -380,29 +493,115 @@ def run(command, dry, what, cwd=None):
     return result.stdout
 
 
-def write_text(path, text, dry, what):
+def unsafe_part(base, path):
+    """The first of the folders from `base` down to `path`, and `path` itself, that is a symlink or not the kind of
+    file expected, or None. `base` itself may be a symlink (a project folder reached through one)."""
+    base, path = os.path.abspath(base), os.path.abspath(path)
+    relative = os.path.relpath(path, base)
+    if relative == os.curdir or relative == os.pardir or relative.startswith(os.pardir + os.sep):
+        return path
+    current = base
+    parts = relative.split(os.sep)
+    for number, part in enumerate(parts):
+        current = os.path.join(current, part)
+        if os.path.islink(current):
+            return current
+        last = number == len(parts) - 1
+        if os.path.lexists(current) and not (os.path.isfile(current) if last else os.path.isdir(current)):
+            return current
+    return None
+
+
+def refuse_unsafe(base, path):
+    found = unsafe_part(base, path)
+    if found:
+        raise SystemExit("error: not written: %s is a symlink, or not a plain file or folder; setup.py writes only plain "
+                         "files in plain folders. Nothing was changed by this step" % found)
+
+
+def write_text(path, text, dry, what, base, mode=0o644):
+    """Write a project file: no symlink on the way, a fresh temporary file in the same folder, then a move."""
+    refuse_unsafe(base, path)
     if dry:
         print("would write: %s   # %s, %d characters" % (path, what, len(text)))
         return
-    folder = os.path.dirname(path)
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-    with open(path + ".part", "w", encoding="utf-8") as handle:
-        handle.write(text)
-    os.replace(path + ".part", path)
+    folder = os.path.dirname(os.path.abspath(path))
+    current = os.path.abspath(base)
+    for part in os.path.relpath(folder, current).split(os.sep):
+        if part in (os.curdir, ""):
+            continue
+        current = os.path.join(current, part)
+        if not os.path.lexists(current):
+            os.mkdir(current)
+    refuse_unsafe(base, path)
+    descriptor, temporary = tempfile.mkstemp(dir=folder, prefix=".part-")
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        refuse_unsafe(base, path)
+        os.replace(temporary, path)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)  # only the temporary file this call made
+        raise
     print("wrote: %s   # %s" % (path, what))
+
+
+def add_trusted(repo):
+    """Add a repository to the user's trusted list through a temporary file; the file keeps its mode."""
+    path = ghim.trusted_file()
+    if os.path.islink(path) or os.path.lexists(path) and not os.path.isfile(path):
+        raise SystemExit("error: %s is a symlink or not a plain file; add %s to it by hand" % (path, repo))
+    folder = os.path.dirname(os.path.abspath(path))
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    current = ghim.read_text(path) if os.path.isfile(path) else ""
+    if current and not current.endswith("\n"):
+        current += "\n"
+    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.isfile(path) else 0o600
+    descriptor, temporary = tempfile.mkstemp(dir=folder, prefix=".part-")
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(current + repo + "\n")
+        os.replace(temporary, path)
+    except BaseException:
+        if os.path.exists(temporary):
+            os.unlink(temporary)  # only the temporary file this call made
+        raise
+    return path
 
 
 def apply(answers, root, dry, drafts):
     config_path = os.path.join(root, ghim.CONFIG_NAME)
+    drafts_base = root if not os.path.relpath(drafts, root).startswith(os.pardir) else os.path.dirname(drafts)
+    workflow = os.path.join(root, ".github", "workflows", "ghim-triage.yml")
+    claude_md = os.path.join(root, "CLAUDE.md")
+    # Every file this run may write is checked before anything is changed.
+    refuse_unsafe(root, config_path)
+    for name in ("hub.md", "resume-1.md", "manifest.json"):
+        refuse_unsafe(drafts_base, os.path.join(drafts, name))
+    if answers["triage_workflow"] and answers["record"] == "this":
+        refuse_unsafe(root, workflow)
+    if answers["claude_md"]:
+        refuse_unsafe(root, claude_md)
     existing = {}
     if os.path.isfile(config_path):
-        with open(config_path, encoding="utf-8") as handle:
-            existing = json.load(handle)
-        if existing.get("repo") and existing["repo"].lower() != answers["repo"].lower():
+        try:
+            existing = json.loads(ghim.read_text(config_path))
+        except ValueError as error:
+            raise SystemExit("error: %s is not valid JSON (%s); fix it by hand" % (config_path, error))
+        if not isinstance(existing, dict):
+            raise SystemExit("error: %s is not a JSON object; fix it by hand" % config_path)
+        if isinstance(existing.get("repo"), str) and existing["repo"].lower() != answers["repo"].lower():
             raise SystemExit("error: %s already names %s; the answers name %s. Change the setup by hand if the record "
                              "moved" % (config_path, existing["repo"], answers["repo"]))
-    config, added = new_config(existing, answers)
+    try:
+        config, added = new_config(existing, answers)
+    except AnswerError as error:
+        raise SystemExit("error: %s" % error)
     print("profiles: %s" % ", ".join(ghim.profile_names(config["profiles"])))
     if existing:
         kept = [n for n in ghim.profile_names(existing.get("profiles") or [])]
@@ -415,11 +614,11 @@ def apply(answers, root, dry, drafts):
         run(["gh", "repo", "create", answers["repo"], "--private", "--description", "Project record"], dry,
             "create the private repository that holds the record")
 
+    labels = setup_labels.wanted_labels(config["profiles"], config["topics"])  # checked before anything is written
     print("config (.gh-issues-manager.json):")
     print(json.dumps(config, indent=2))
-    write_text(config_path, json.dumps(config, indent=2) + "\n", dry, "the project's setup")
+    write_text(config_path, json.dumps(config, indent=2) + "\n", dry, "the project's setup", root)
 
-    labels = setup_labels.wanted_labels(config["profiles"], config["topics"])
     print("labels: %d (%s)" % (len(labels), ", ".join(l["name"] for l in labels)))
     run([python, os.path.join(scripts, "setup_labels.py"), "--repo", answers["repo"]], dry,
         "create the labels that are missing (%d wanted)" % len(labels), cwd=root)
@@ -438,9 +637,10 @@ def apply(answers, root, dry, drafts):
                     "comments": [{"issue": "NEW-hub", "kind": "resume", "body_file": "resume-1.md"}]}
         print("hub draft (%d characters):" % len(hub))
         print("\n".join("  | " + line for line in hub.rstrip("\n").split("\n")))
-        write_text(os.path.join(drafts, "hub.md"), hub, dry, "the hub")
-        write_text(os.path.join(drafts, "resume-1.md"), resume, dry, "the first resume comment")
-        write_text(os.path.join(drafts, "manifest.json"), json.dumps(manifest, indent=2) + "\n", dry, "the manifest")
+        write_text(os.path.join(drafts, "hub.md"), hub, dry, "the hub", drafts_base)
+        write_text(os.path.join(drafts, "resume-1.md"), resume, dry, "the first resume comment", drafts_base)
+        write_text(os.path.join(drafts, "manifest.json"), json.dumps(manifest, indent=2) + "\n", dry, "the manifest",
+                   drafts_base)
         out = run([python, os.path.join(scripts, "create_issues.py"), "--manifest", os.path.join(drafts, "manifest.json"),
                    "--repo", answers["repo"]], dry, "create and pin the hub, post the first resume comment", cwd=root)
         if not dry:
@@ -448,7 +648,7 @@ def apply(answers, root, dry, drafts):
             if not match:
                 raise SystemExit("error: the hub number was not found in the output of create_issues.py")
             config["hub"] = int(match.group(1))
-            write_text(config_path, json.dumps(config, indent=2) + "\n", dry, "the hub number")
+            write_text(config_path, json.dumps(config, indent=2) + "\n", dry, "the hub number", root)
     else:
         print("hub: #%d exists; add rows for new sections to its deliverable tables with post_verified.py body" %
               existing["hub"])
@@ -464,32 +664,41 @@ def apply(answers, root, dry, drafts):
         elif dry:
             print("would add: %s to %s   # the user agreed" % (answers["repo"], trusted))
         else:
-            os.makedirs(os.path.dirname(trusted), mode=0o700, exist_ok=True)
-            with open(trusted, "a", encoding="utf-8") as handle:
-                handle.write("%s\n" % answers["repo"])
-            print("added: %s to %s" % (answers["repo"], trusted))
+            print("added: %s to %s" % (answers["repo"], add_trusted(answers["repo"])))
     else:
         print("trusted: not changed; the hooks stay silent until the user adds %s to %s" % (answers["repo"],
                                                                                           ghim.trusted_file()))
 
-    if answers["triage_workflow"]:
-        target = os.path.join(root, ".github", "workflows", "ghim-triage.yml")
+    if answers["triage_workflow"] and answers["record"] != "this":
+        print("not written: the triage labeler runs in the repository that holds the issues (%s), not in this project; "
+              "commit templates/ghim-triage.yml there as .github/workflows/ghim-triage.yml" % answers["repo"])
+    elif answers["triage_workflow"]:
         text = ghim.read_text(os.path.join(TEMPLATES, "ghim-triage.yml"))
-        if os.path.exists(target) and ghim.read_text(target) != text:
-            print("not written: %s exists with other content; compare it with templates/ghim-triage.yml" % target)
+        if os.path.exists(workflow) and ghim.read_text(workflow) != text:
+            print("not written: %s exists with other content; compare it with templates/ghim-triage.yml" % workflow)
         else:
-            write_text(target, text, dry, "the triage labeler workflow; commit it to turn it on")
+            write_text(workflow, text, dry, "the triage labeler workflow; commit it to turn it on", root)
     if answers["claude_md"]:
-        target = os.path.join(root, "CLAUDE.md")
-        current = ghim.read_text(target) if os.path.isfile(target) else ""
+        current = ghim.read_text(claude_md) if os.path.isfile(claude_md) else ""
         if "## Project record" in current:
             print("not written: CLAUDE.md already has a Project record section")
         else:
-            write_text(target, (current.rstrip("\n") + "\n\n" if current else "") + snippet(config), dry,
-                       "the CLAUDE.md snippet")
+            write_text(claude_md, (current.rstrip("\n") + "\n\n" if current else "") + snippet(config), dry,
+                       "the CLAUDE.md snippet", root)
 
     run([python, os.path.join(scripts, "index.py"), "--repo", answers["repo"], "sync"], dry,
         "build the local index in the foreground, so the first session has a brief", cwd=root)
+    present = [item["kind"] for item in detect(root)]
+    if dry:
+        print("would record as known: %s   # the hooks suggest only deliverables that appear later" %
+              (", ".join(present) or "nothing"))
+    else:
+        try:
+            remember_told(answers["repo"], present)
+            print("recorded as known: %s" % (", ".join(present) or "nothing"))
+        except (OSError, storage.StorageError) as error:
+            print("not recorded: the kinds present now (%s), because the local storage was refused: %s. The hooks may "
+                  "suggest them once; hooks.py --doctor shows the storage" % (", ".join(present), error))
     if answers["catch_up"]:
         print("next: catch up on earlier work (references/catch-up.md), starting with catchup.py inventory%s"
               % (" --transcripts" if answers["read_transcripts"] else ""))

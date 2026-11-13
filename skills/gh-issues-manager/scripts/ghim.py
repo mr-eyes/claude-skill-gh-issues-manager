@@ -367,12 +367,18 @@ def profile_prefix(name):
 def custom_sections(entry):
     """(profile name, [(label, heading)]) for a profile entry with sections chosen at setup, or None if invalid.
 
-    The entry names a shipped profile and lists [label, heading] pairs. Each
-    label must carry that profile's prefix and a plain slug, each heading a plain
-    form; duplicates, "Sources" and more than 20 sections are refused, so a
-    project file cannot name role, topic or type labels or carry other text.
+    The entry names a shipped profile and lists [label, heading] pairs; an entry
+    of the custom profile also names its deliverable ("deliverable", a plain
+    heading). Each label must carry that profile's prefix and a plain slug, each
+    heading a plain form; duplicates, "Sources" and more than 20 sections are
+    refused, so a project file cannot name role, topic or type labels or carry
+    other text.
     """
-    if not isinstance(entry, dict) or set(entry) - {"name", "sections"} or not is_shipped(entry.get("name")):
+    if not isinstance(entry, dict) or set(entry) - {"name", "sections", "deliverable"} or \
+            not is_shipped(entry.get("name")):
+        return None
+    if "deliverable" in entry and not (isinstance(entry["deliverable"], str) and
+                                       HEADING_TEXT.fullmatch(entry["deliverable"])):
         return None
     prefix = profile_prefix(entry["name"])
     sections = entry.get("sections")
@@ -398,7 +404,7 @@ def shipped_profiles(names):
     """The profile entries a hook may use: names of profiles shipped in profiles/, and entries with sections
     chosen at setup that pass custom_sections. Hooks never load a profile from a path a project names."""
     out = []
-    for entry in names or []:
+    for entry in names if isinstance(names, list) else []:
         if isinstance(entry, str) and is_shipped(entry):
             out.append(entry)
         elif isinstance(entry, dict):
@@ -409,8 +415,12 @@ def shipped_profiles(names):
 
 
 def profile_names(profiles):
-    """The profile names of a profiles list that may hold entries with sections chosen at setup."""
-    return [p["name"] if isinstance(p, dict) else p for p in profiles or [] if isinstance(p, (str, dict))]
+    """The profile names of a profiles list that may hold entries with sections chosen at setup. Entries that are
+    neither a name nor a dict with a name are left out."""
+    if not isinstance(profiles, list):
+        return []
+    return [p["name"] if isinstance(p, dict) else p for p in profiles
+            if isinstance(p, str) or isinstance(p, dict) and isinstance(p.get("name"), str)]
 
 
 def section_labels(profiles, shipped_only=False):
