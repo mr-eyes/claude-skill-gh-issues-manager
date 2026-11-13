@@ -12,27 +12,32 @@
     {
       "name": "rd:question",
       "color": "1d76db",
-      "description": "Feeds the report: question and background"
+      "description": "Issue body is report text for: question and background",
+      "heading": "Question"
     },
     {
       "name": "rd:methods",
       "color": "1d76db",
-      "description": "Feeds the report: methods and settings"
+      "description": "Issue body is report text for: methods and settings",
+      "heading": "Methods"
     },
     {
       "name": "rd:results",
       "color": "1d76db",
-      "description": "Feeds the report: results"
+      "description": "Issue body is report text for: results",
+      "heading": "Results"
     },
     {
       "name": "rd:limitations",
       "color": "1d76db",
-      "description": "Feeds the report: limits and negative results"
+      "description": "Issue body is report text for: limits and negative results",
+      "heading": "Limitations"
     },
     {
       "name": "rd:next",
       "color": "1d76db",
-      "description": "Feeds the report: recommended next work"
+      "description": "Issue body is report text for: recommended next work",
+      "heading": "Recommendations"
     }
   ]
 }

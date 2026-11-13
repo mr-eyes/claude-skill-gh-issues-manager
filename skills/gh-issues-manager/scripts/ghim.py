@@ -18,6 +18,9 @@ RESUME_END = "<!-- ghim:resume:end -->"
 RESUME_HEADING = "### Resume block: "
 RESUME_LIMIT = 4000
 PLACEHOLDER_RE = re.compile(r"\bNEW-([a-z0-9]+(?:-[a-z0-9]+)*)")
+PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "profiles")
+SOURCES_HEADING = "Sources"
+RECORD_HEADING = "### Record: former issue body, kept as history (not deliverable text)"
 
 
 class GhError(RuntimeError):
@@ -306,9 +309,114 @@ def parse_json_stream(text):
     return items
 
 
-def read_issue_body(repo, number, timeout=60):
+def read_issue(repo, number, timeout=60):
+    """The issue's body and label names, read from the REST API."""
     data = json.loads(gh(["api", "repos/%s/issues/%d" % (repo, number)], timeout=timeout))
-    return data.get("body") or ""
+    return {"body": data.get("body") or "",
+            "labels": [label.get("name", "") for label in data.get("labels") or []]}
+
+
+def read_issue_body(repo, number, timeout=60):
+    return read_issue(repo, number, timeout)["body"]
+
+
+def load_profile(name):
+    """A profile from profiles/<name>.json, or from a file path. Raises ValueError when there is none."""
+    path = name if os.path.isfile(name) else os.path.join(PROFILE_DIR, name + ".json")
+    if not os.path.isfile(path):
+        available = sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
+        raise ValueError("no profile %r. Available: %s" % (name, ", ".join(available)))
+    with open(path, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def section_labels(profiles):
+    """The deliverable-section labels of the given profiles, as a list of (label, heading).
+
+    A section label is a profile label with a "heading": the level-2 heading
+    that a topic body uses for the text of that section.
+    """
+    out = []
+    for name in profiles:
+        for label in load_profile(name).get("labels", []):
+            if label.get("heading"):
+                out.append((label["name"], label["heading"]))
+    return out
+
+
+def body_sections(text):
+    """The level-2 headings of a body outside fenced blocks, as a list of (line number, heading text)."""
+    found, fence = [], None
+    for number, line in enumerate(text.replace("\r\n", "\n").split("\n"), 1):
+        stripped = line.strip()
+        opening = re.match(r"^(```+|~~~+)", stripped)
+        if fence is None and opening:
+            fence = opening.group(1)
+            continue
+        if fence is not None:
+            if stripped.startswith(fence) and stripped.strip(fence[0]) == "":
+                fence = None
+            continue
+        match = re.match(r"^## +(.*?)\s*#*\s*$", line)
+        if match:
+            found.append((number, match.group(1).strip()))
+    return found
+
+
+def labels_from_headings(text, profiles, intended=None):
+    """The section labels a body's headings call for.
+
+    Returns (labels, problems). When the profiles define section labels, every
+    level-2 heading other than "Sources" must be the heading of one of them. When several profiles
+    use the same heading, the labels in `intended` choose between them;
+    without a choice the heading is reported as ambiguous.
+    """
+    by_heading = {}
+    for label, heading in section_labels(profiles):
+        by_heading.setdefault(heading.lower(), []).append(label)
+    labels, problems = [], []
+    if not by_heading:
+        return labels, problems  # no section labels: the headings are free
+    for number, heading in body_sections(text):
+        if heading.lower() == SOURCES_HEADING.lower():
+            continue
+        candidates = by_heading.get(heading.lower())
+        if not candidates:
+            problems.append((number, "'## %s' is not a section heading of the profiles %s; use one of: %s"
+                             % (heading, ", ".join(profiles) or "(none)",
+                                ", ".join(sorted({h for _, h in section_labels(profiles)})) or "(none)")))
+            continue
+        if len(candidates) > 1 and intended is not None:
+            chosen = [label for label in candidates if label in intended]
+            candidates = chosen or candidates
+        if len(candidates) > 1:
+            problems.append((number, "'## %s' is the heading of %s; name the profile or the intended labels"
+                             % (heading, " and ".join(candidates))))
+            continue
+        if candidates[0] not in labels:
+            labels.append(candidates[0])
+    return labels, problems
+
+
+def label_changes(current, wanted, profiles):
+    """Section labels to add and to remove so that an issue's labels follow its body's headings.
+
+    Only section labels of the given profiles are ever removed; role and topic
+    labels are left as they are.
+    """
+    known = {label for label, _ in section_labels(profiles)}
+    add = [label for label in wanted if label not in current]
+    remove = [label for label in current if label in known and label not in wanted]
+    return add, remove
+
+
+def label_command(repo, number, add, remove):
+    command = ["issue", "edit", str(number), "--repo", repo]
+    for label in add:
+        command += ["--add-label", label]
+    for label in remove:
+        command += ["--remove-label", label]
+    return command
 
 
 def read_comment_body(repo, comment_id):

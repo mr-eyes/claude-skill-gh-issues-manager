@@ -11,27 +11,32 @@
     {
       "name": "proto:hypothesis",
       "color": "1d76db",
-      "description": "Feeds the recommendation: what the prototype tests"
+      "description": "Issue body is recommendation text for: what the prototype tests",
+      "heading": "Hypothesis"
     },
     {
       "name": "proto:setup",
       "color": "1d76db",
-      "description": "Feeds the recommendation: setup and settings"
+      "description": "Issue body is recommendation text for: setup and settings",
+      "heading": "Setup"
     },
     {
       "name": "proto:results",
       "color": "1d76db",
-      "description": "Feeds the recommendation: measurements"
+      "description": "Issue body is recommendation text for: measurements",
+      "heading": "Measurements"
     },
     {
       "name": "proto:limitations",
       "color": "1d76db",
-      "description": "Feeds the recommendation: limits and untested cases"
+      "description": "Issue body is recommendation text for: limits and untested cases",
+      "heading": "Limitations"
     },
     {
       "name": "proto:go-no-go",
       "color": "1d76db",
-      "description": "Feeds the recommendation itself"
+      "description": "Issue body is recommendation text for: the go or no-go recommendation",
+      "heading": "Recommendation"
     }
   ]
 }

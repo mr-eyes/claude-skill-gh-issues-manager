@@ -13,27 +13,32 @@
     {
       "name": "rel:added",
       "color": "1d76db",
-      "description": "Feeds the release notes: new behavior"
+      "description": "Issue body is release text for: new behavior",
+      "heading": "Added"
     },
     {
       "name": "rel:changed",
       "color": "1d76db",
-      "description": "Feeds the release notes: changed or removed behavior"
+      "description": "Issue body is release text for: changed or removed behavior",
+      "heading": "Changed"
     },
     {
       "name": "rel:fixed",
       "color": "1d76db",
-      "description": "Feeds the release notes: fixes"
+      "description": "Issue body is release text for: fixes",
+      "heading": "Fixed"
     },
     {
       "name": "rel:docs",
       "color": "1d76db",
-      "description": "Feeds the documentation"
+      "description": "Issue body is release text for: documentation",
+      "heading": "Documentation"
     },
     {
       "name": "rel:known-issues",
       "color": "1d76db",
-      "description": "Feeds the known issues and limits"
+      "description": "Issue body is release text for: known issues and limits",
+      "heading": "Known issues"
     }
   ]
 }

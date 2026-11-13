@@ -11,12 +11,12 @@
     {
       "name": "final-record",
       "color": "5319e7",
-      "description": "Self-contained record of one topic"
+      "description": "Topic issue: the body is current deliverable text, the comments are its history"
     },
     {
       "name": "active",
       "color": "5319e7",
-      "description": "Bounded task in progress; names its destination topic"
+      "description": "Work in development; names its destination topic; carries no section labels"
     },
     {
       "name": "needs-decision",

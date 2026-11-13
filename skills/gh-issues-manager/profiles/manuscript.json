@@ -12,27 +12,32 @@
     {
       "name": "ms:background",
       "color": "1d76db",
-      "description": "Feeds the manuscript: introduction and background"
+      "description": "Issue body is manuscript text for: introduction and background",
+      "heading": "Background"
     },
     {
       "name": "ms:methods",
       "color": "1d76db",
-      "description": "Feeds the manuscript: methods"
+      "description": "Issue body is manuscript text for: methods",
+      "heading": "Methods"
     },
     {
       "name": "ms:results",
       "color": "1d76db",
-      "description": "Feeds the manuscript: results, figures and tables"
+      "description": "Issue body is manuscript text for: results, figures and tables",
+      "heading": "Results"
     },
     {
       "name": "ms:limitations",
       "color": "1d76db",
-      "description": "Feeds the manuscript: limitations and discussion"
+      "description": "Issue body is manuscript text for: limitations and discussion",
+      "heading": "Limitations"
     },
     {
       "name": "ms:supplement",
       "color": "1d76db",
-      "description": "Feeds the manuscript: supplement"
+      "description": "Issue body is manuscript text for: supplement",
+      "heading": "Supplement"
     }
   ]
 }

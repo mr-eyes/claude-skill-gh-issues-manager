@@ -18,17 +18,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 
-PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "profiles")
 TOPIC_COLOR = "0e8a16"
 
 
 def load_profile(name):
-    path = name if os.path.isfile(name) else os.path.join(PROFILE_DIR, name + ".json")
-    if not os.path.isfile(path):
-        available = sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
-        sys.exit("error: no profile %r. Available: %s" % (name, ", ".join(available)))
-    with open(path, encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        return ghim.load_profile(name)
+    except ValueError as error:
+        sys.exit("error: %s" % error)
 
 
 def wanted_labels(profiles, topics):
