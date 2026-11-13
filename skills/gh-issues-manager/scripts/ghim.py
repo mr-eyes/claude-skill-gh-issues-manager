@@ -330,17 +330,36 @@ def load_profile(name):
         return json.load(handle)
 
 
+LABEL_NAME = re.compile(r"[a-z0-9][a-z0-9:._-]{0,49}")
+HEADING_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ,.'()-]{0,59}")
+PROFILE_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+
+
+def shipped_profiles(names):
+    """Only the names of profiles shipped in profiles/; hooks never load a profile from a path a project names."""
+    out = []
+    for name in names or []:
+        if isinstance(name, str) and PROFILE_NAME.fullmatch(name) and \
+                os.path.isfile(os.path.join(PROFILE_DIR, name + ".json")):
+            out.append(name)
+    return out
+
+
 def section_labels(profiles):
     """The deliverable-section labels of the given profiles, as a list of (label, heading).
 
     A section label is a profile label with a "heading": the level-2 heading
-    that a topic body uses for the text of that section.
+    that a topic body uses for the text of that section. Labels and headings
+    that do not fit a plain pattern (letters, digits, a few punctuation marks,
+    a length limit) are left out, so a custom profile cannot carry other text.
     """
     out = []
     for name in profiles:
         for label in load_profile(name).get("labels", []):
-            if label.get("heading"):
-                out.append((label["name"], label["heading"]))
+            heading, label_name = label.get("heading"), label.get("name")
+            if isinstance(heading, str) and isinstance(label_name, str) and \
+                    HEADING_TEXT.fullmatch(heading) and LABEL_NAME.fullmatch(label_name):
+                out.append((label_name, heading))
     return out
 
 
