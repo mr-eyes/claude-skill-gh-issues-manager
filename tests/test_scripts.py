@@ -1360,8 +1360,10 @@ class ResumeBlockTests(Sandbox):
         self.assertIn("doesn't exist on type 'IssueComment'", result.stderr)
 
     def test_hook_is_silent_when_gh_fails_or_no_config(self):
-        failing = self.run_hook(gh="false")
-        self.assertEqual((0, "", ""), (failing.returncode, failing.stdout, failing.stderr))
+        failing = self.run_hook(gh="false")  # set up and trusted: one line says why there is no brief
+        self.assertEqual((0, ""), (failing.returncode, failing.stderr))
+        self.assertEqual(["gh-issues-manager: record brief not shown: there is no local index yet and GitHub could "
+                          "not be read (gh failed). Run hooks.py --doctor."], failing.stdout.strip().split("\n"))
         unconfigured = self.run_hook(cwd=self.dir, env={"CLAUDE_PROJECT_DIR": self.dir})
         self.assertEqual((0, ""), (unconfigured.returncode, unconfigured.stdout))
 
@@ -1369,7 +1371,9 @@ class ResumeBlockTests(Sandbox):
         start = time.time()
         result = self.run_hook(env={"FAKE_GH_SLEEP": "6", "GHIM_HOOK_TIMEOUT": "2", "GHIM_HOOK_CALL_TIMEOUT": "4"})
         self.assertLess(time.time() - start, 5.5)
-        self.assertEqual((0, ""), (result.returncode, result.stdout))
+        self.assertEqual(0, result.returncode)
+        self.assertIn("record brief not shown: there is no local index yet and GitHub could not be read (timed out)",
+                      result.stdout)
 
 
 EVENT_COMMENTS = {
@@ -1566,7 +1570,8 @@ class HookTests(RecordSandbox):
         self.assertIn("Invoke the gh-issues-manager skill before writing", session)
 
     def test_session_start_falls_back_to_the_cached_index(self):
-        self.assertEqual("", self.hook("session-start", gh="false").stdout)  # no index yet and no GitHub
+        first = self.hook("session-start", gh="false").stdout  # no index yet and no GitHub: one line, not silence
+        self.assertIn("record brief not shown: there is no local index yet and GitHub could not be read", first)
         self.hook("session-start")
         cached = self.hook("session-start", gh="false")
         self.assertEqual(0, cached.returncode)
@@ -1662,7 +1667,7 @@ class StorageTests(RecordSandbox):
     """The index and the hook state live outside the project tree and are read only when the plugin made them."""
 
     def index_file(self):
-        return os.path.join(self.data, "example-org__tinycsv", "index.sqlite")
+        return os.path.join(self.data, "private", "example-org__tinycsv", "index.sqlite")
 
     def set_meta(self, **values):
         import sqlite3
@@ -1689,13 +1694,16 @@ class StorageTests(RecordSandbox):
     def test_index_without_plugin_data_goes_to_the_user_cache_never_the_project(self):
         del self.env["CLAUDE_PLUGIN_DATA"]
         self.plant(os.path.join(self.project, ".tmp", "gh-issues-manager", "example-org__tinycsv", "index.sqlite"))
-        self.assertEqual("", self.hook("session-start", gh="false").stdout)  # the planted file is never looked at
+        first = self.hook("session-start", gh="false").stdout  # the planted file is never looked at
+        self.assertEqual("gh-issues-manager: record brief not shown: there is no local index yet and GitHub could not "
+                         "be read (gh failed). Run hooks.py --doctor.\n", first)
         self.hook("session-start")
-        made = os.path.join(self.dir, "xdg-cache", "gh-issues-manager", "example-org__tinycsv", "index.sqlite")
+        made = os.path.join(self.dir, "xdg-cache", "gh-issues-manager", "private", "example-org__tinycsv", "index.sqlite")
         self.assertTrue(os.path.isfile(made))
         self.assertEqual(0o700, os.stat(os.path.dirname(made)).st_mode & 0o777)
+        self.assertEqual(0o700, os.stat(os.path.dirname(os.path.dirname(made))).st_mode & 0o777)
         self.assertEqual(0o600, os.stat(made).st_mode & 0o777)
-        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-state", "gh-issues-manager", "key")))
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-state", "gh-issues-manager", "private", "key")))
         cached = self.hook("session-start", gh="false").stdout
         self.assertIn("cached, not refreshed", cached)
         self.assertNotIn("PLANTED", cached)
@@ -1703,7 +1711,11 @@ class StorageTests(RecordSandbox):
     def test_an_index_the_plugin_did_not_make_is_refused(self):
         self.plant(self.index_file())
         for gh in ("false", FAKE):
-            self.assertEqual("", self.hook("session-start", gh=gh).stdout)
+            notice = self.hook("session-start", gh=gh).stdout
+            self.assertEqual(1, len(notice.strip().split("\n")), notice)
+            self.assertIn("record brief not shown: the local storage was refused", notice)
+            self.assertIn("not created by this plugin for this user", notice)
+            self.assertNotIn("PLANTED", notice)
         status = self.tool("index.py", "status")
         self.assertNotEqual(0, status.returncode)
         self.assertIn("not created by this plugin for this user", status.stderr)
@@ -1718,8 +1730,10 @@ class StorageTests(RecordSandbox):
     def test_symlinks_and_loose_permissions_are_refused(self):
         self.tool("index.py", "sync")
         os.chmod(self.index_file(), 0o664)
-        self.assertIn("writable by group or others", self.tool("index.py", "status").stderr)
-        self.assertEqual("", self.hook("subagent-start").stdout)
+        self.assertIn("permissions for group or others (mode 664)", self.tool("index.py", "status").stderr)
+        context = json.loads(self.hook("subagent-start").stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertTrue(context.startswith("gh-issues-manager: record brief not shown: the local storage was refused"))
+        self.assertIn("Run hooks.py --doctor.", context)
         os.chmod(self.index_file(), 0o600)
         moved = os.path.join(self.dir, "elsewhere.sqlite")
         os.rename(self.index_file(), moved)
@@ -1729,15 +1743,60 @@ class StorageTests(RecordSandbox):
         os.unlink(self.index_file())
         os.rename(moved, self.index_file())
         self.assertIn("issues 7", self.tool("index.py", "status").stdout)
-        folder = os.path.join(self.data, "example-org__tinycsv")
+        folder = os.path.join(self.data, "private", "example-org__tinycsv")
         os.rename(folder, folder + "-real")
         os.symlink(folder + "-real", folder)
         self.assertIn("is a symlink", self.tool("index.py", "status").stderr)
         self.assertNotEqual(0, self.tool("index.py", "sync").returncode)
 
+    def test_a_loose_plugin_data_folder_made_by_claude_code_is_tightened(self):
+        parent = os.path.join(self.dir, "claude-plugins-data")
+        os.makedirs(os.path.join(parent, "gh-issues-manager-inline"))
+        self.data = os.path.join(parent, "gh-issues-manager-inline")
+        os.chmod(parent, 0o775)
+        os.chmod(self.data, 0o775)
+        self.env["CLAUDE_PLUGIN_DATA"] = self.data
+        session = self.hook("session-start").stdout
+        self.assertIn("(read from GitHub just now)", session)
+        self.assertIn("**Current focus:** Release 0.3.0", session)
+        self.assertEqual(0o700, os.stat(self.data).st_mode & 0o777)
+        self.assertEqual(0o775, os.stat(parent).st_mode & 0o777)  # folders above the top folder are left alone
+        self.assertEqual(0o700, os.stat(os.path.join(self.data, "private")).st_mode & 0o777)
+        context = json.loads(self.hook("subagent-start").stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("#5 Reader: quoting and line endings", context)
+        os.chmod(os.path.join(self.data, "private"), 0o750)  # the private folder itself is never loosened silently
+        notice = self.hook("session-start").stdout
+        self.assertIn("record brief not shown: the local storage was refused", notice)
+        self.assertIn("chmod 700", notice)
+
+    def test_doctor_explains_without_secrets(self):
+        self.hook("session-start")
+        result = self.tool("hooks.py", "--doctor", gh="false")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        for expected in ("config: %s" % os.path.join(self.project, ghim.CONFIG_NAME),
+                         "repository: example-org/tinycsv   hub: 4", "trusted: yes", "allowed authors: example-org, octo-dev",
+                         "index file", "owner ", "mode 600", "mode 700", "index: synced 20", "last sync failure: none",
+                         "payload session-start", "payload subagent-start", "result: the hooks can show the brief"):
+            self.assertIn(expected, result.stdout)
+        key = ghim.read_text(os.path.join(self.dir, "xdg-state", "gh-issues-manager", "private", "key")).strip()
+        self.assertNotIn(key, result.stdout)
+        self.hook("session-start", gh="false")
+        self.assertIn("last sync failure: GitHub could not be read (gh failed) at 20",
+                      self.tool("hooks.py", "--doctor", gh="false").stdout)
+        self.set_meta(mark="0" * 64)
+        refused = self.tool("hooks.py", "--doctor", gh="false")
+        self.assertEqual(1, refused.returncode)
+        self.assertIn("problem: index refused:", refused.stdout)
+        untrusted = self.tool("hooks.py", "--doctor", env={"GHIM_TRUSTED_FILE": os.path.join(self.dir, "absent")})
+        self.assertIn("trusted: no", untrusted.stdout)
+        self.assertIn("problem: the repository is not trusted", untrusted.stdout)
+        unconfigured = self.tool("hooks.py", "--doctor", env={"CLAUDE_PROJECT_DIR": self.dir})
+        self.assertEqual(1, unconfigured.returncode)
+        self.assertIn("not set up", unconfigured.stdout)
+
     def test_state_file_is_never_written_through_a_symlink(self):
         self.hook("session-start", session="s1")
-        state = os.path.join(self.data, "example-org__tinycsv", "prompt-state.json")
+        state = os.path.join(self.data, "private", "example-org__tinycsv", "prompt-state.json")
         self.assertEqual(0o600, os.stat(state).st_mode & 0o777)
         target = self.write("precious.txt", "keep me\n")
         os.unlink(state)
