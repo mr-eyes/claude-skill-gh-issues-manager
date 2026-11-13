@@ -2358,37 +2358,66 @@ class RecoveryTests(RecordSandbox):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertNotIn("1; rm", result.stdout + result.stderr)
 
-    def test_only_one_process_takes_the_lock(self):
-        import multiprocessing
-        import index as index_module
+    def lock_environment(self):
+        """Point this process at the sandbox storage; restored at cleanup. Returns the lock path."""
         environment = {"GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1",
                        "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
                        "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache")}
         saved = {k: os.environ.get(k) for k in environment}
+
+        def restore():
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.addCleanup(restore)
         os.environ.update(environment)
+        folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
+        return os.path.join(folder, "sync.lock")
+
+    def plant_lock(self, lock, pid=4194000):
+        import index as index_module
+        with open(lock, "w") as handle:  # pid 4194000 does not exist: a stale lock
+            json.dump({"pid": pid, "host": index_module.HOST, "started": time.time(), "budget": 300}, handle)
+        os.chmod(lock, 0o600)
+
+    def test_only_one_process_takes_the_lock(self):
+        import multiprocessing
+        import random
+        import index as index_module
+        if "fork" not in multiprocessing.get_all_start_methods():
+            self.skipTest("the lock race needs the fork start method, which this platform does not have")
+        context = multiprocessing.get_context("fork")
+        lock = self.lock_environment()
+
+        def widened(real):
+            def call(*args):
+                out = real(*args)
+                time.sleep(random.random() * 0.002)  # a wider window between the judgment and the removal
+                return out
+            return call
+
+        def worker(at, queue):
+            while time.time() < at:
+                pass
+            try:
+                queue.put(bool(index_module.take_lock(REPO, 300)))
+            except Exception as error:  # noqa: BLE001 - counted below
+                queue.put("raised %s" % type(error).__name__)
+            time.sleep(1.0)  # stay alive, as a sync would
+
+        real = index_module.live_lock, index_module._identity
+        index_module.live_lock, index_module._identity = widened(real[0]), widened(real[1])  # the workers inherit them
         try:
-            folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
-            lock = os.path.join(folder, "sync.lock")
-
-            def worker(at, queue):
-                while time.time() < at:
-                    pass
-                try:
-                    queue.put(bool(index_module.take_lock(REPO, 300)))
-                except Exception as error:  # noqa: BLE001 - counted below
-                    queue.put("raised %s" % type(error).__name__)
-                time.sleep(1.0)  # stay alive, as a sync would
-
             for mode in ("no lock", "stale lock"):
                 for round_number in range(20):
                     if mode == "stale lock":
-                        with open(lock, "w") as handle:
-                            json.dump({"pid": 4194000, "host": index_module.HOST, "started": time.time(),
-                                       "budget": 300}, handle)
-                        os.chmod(lock, 0o600)
-                    queue = multiprocessing.Queue()
+                        self.plant_lock(lock)
+                    queue = context.Queue()
                     at = time.time() + 0.3
-                    workers = [multiprocessing.Process(target=worker, args=(at, queue)) for _ in range(6)]
+                    workers = [context.Process(target=worker, args=(at, queue)) for _ in range(6)]
                     for process in workers:
                         process.start()
                     results = [queue.get(timeout=60) for _ in workers]
@@ -2396,13 +2425,75 @@ class RecoveryTests(RecordSandbox):
                         process.join()
                     self.assertEqual(1, results.count(True), (mode, round_number, results))
                     self.assertEqual([], [r for r in results if not isinstance(r, bool)], (mode, round_number))
+                    self.assertFalse(os.path.lexists(lock + ".claim"), (mode, round_number))
                     os.rename(lock, "%s.round-%s-%d" % (lock, mode[:5].strip(), round_number))
         finally:
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+            index_module.live_lock, index_module._identity = real
+
+    def test_a_claim_left_by_a_dead_process_does_not_block(self):
+        import index as index_module
+        lock = self.lock_environment()
+        self.plant_lock(lock)
+        os.link(lock, lock + ".claim")  # a judge that died while it held the claim
+        start = time.time()
+        self.assertTrue(index_module.take_lock(REPO, 300))
+        self.assertLess(time.time() - start, 4)
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        index_module.release_lock(REPO)
+        self.assertFalse(os.path.lexists(lock))
+
+    def test_a_live_lock_judged_through_the_claim_stays(self):
+        import index as index_module
+        lock = self.lock_environment()
+        self.plant_lock(lock, pid=os.getpid())  # this process on this host: live
+        self.addCleanup(os.unlink, lock)  # before the sandbox cleanup, which stops the process a lock names
+        before = ghim.read_text(lock), os.stat(lock).st_ino
+        self.assertFalse(index_module.take_lock(REPO, 300))
+        self.assertEqual(before, (ghim.read_text(lock), os.stat(lock).st_ino))
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        os.link(lock, lock + ".claim")  # also when a claim was left on it
+        self.assertFalse(index_module.take_lock(REPO, 300))
+        self.assertEqual(before, (ghim.read_text(lock), os.stat(lock).st_ino))
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_a_symlinked_lock_is_refused_and_its_target_never_linked(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.lock_environment()
+        target = os.path.join(self.dir, "outside-lock")
+        self.plant_lock(target)
+        os.symlink(target, lock)
+        with self.assertRaises(storage_module.StorageError) as caught:
+            index_module.take_lock(REPO, 300)
+        self.assertEqual("symlink", caught.exception.kind)
+        self.assertEqual(1, os.stat(target).st_nlink)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+        # A lock swapped for a symlink just after it was checked: the claim is a link to the symlink itself.
+        os.unlink(lock)
+        self.plant_lock(lock)
+        real_check, real_live, links = storage_module.check_path, index_module.live_lock, []
+
+        def check_then_swap(path, kind="folder"):
+            out = real_check(path, kind)
+            if path == lock and not os.path.islink(lock):
+                os.unlink(lock)
+                os.symlink(target, lock)
+            return out
+
+        def live(data):
+            links.append(os.stat(target).st_nlink)  # 2 while the target is linked into the folder
+            return real_live(data)
+
+        storage_module.check_path, index_module.live_lock = check_then_swap, live
+        try:
+            with self.assertRaises(storage_module.StorageError):
+                index_module.take_lock(REPO, 300)
+        finally:
+            storage_module.check_path, index_module.live_lock = real_check, real_live
+        self.assertEqual([], links)
+        self.assertEqual(1, os.stat(target).st_nlink)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
 
     def test_lock_fields_and_hosts(self):
         import index as index_module
