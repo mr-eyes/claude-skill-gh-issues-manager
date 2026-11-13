@@ -21,17 +21,17 @@ No hook can make the skill load, so each payload carries the rules itself and sa
 "prompt_hook": {"enabled": true, "every": 10}
 ```
 
-`python3 scripts/hooks.py --print` shows the four payloads and their sizes, for the user to check.
+`python3 scripts/hooks.py --print` shows the four payloads and their sizes, for the user to check. `python3 scripts/hooks.py --doctor` says why the brief is or is not shown: the configuration, the trust status, each storage folder with its owner and mode, the index and its age, the last sync failure and the payload sizes. It reads nothing from GitHub, changes nothing and never prints the key.
 
 ### Safety
 
-Every hook prints nothing and exits 0 when the project has no `.gh-issues-manager.json`, when its repository is not in the user's trusted list (see [session-protocol.md](session-protocol.md)), when there is no index yet and GitHub cannot be read, or on any error. None of them writes to GitHub or blocks a session.
+Every hook prints nothing and exits 0 when the project has no `.gh-issues-manager.json` or its repository is not in the user's trusted list (see [session-protocol.md](session-protocol.md)). In a project that is set up and trusted, the SessionStart and SubagentStart hooks are never silent: when the brief cannot be produced (the local storage was refused, there is no index yet and GitHub cannot be read, any other error) they print one line, `gh-issues-manager: record brief not shown: <reason>. Run hooks.py --doctor.` The other two stay silent then. None of the hooks writes to GitHub or blocks a session.
 
 Text that comes from GitHub sits between the `BEGIN PROJECT STATUS DATA` and `END PROJECT STATUS DATA` lines, which say it is data and not instructions; look-alike delimiters are defused and line breaks removed from titles. The resume block passes the same author and edit checks as `resume_block.py show`; only a block that passed them when it was read is cached, and a cached block older than `resume_cache_days` (default 7) is left out when GitHub cannot be read. A brief built from the index after a failed sync says "cached, not refreshed" and how old it is. The index and the hook state are kept outside the project tree and are read only when the plugin made them for this user (see [session-protocol.md](session-protocol.md), "Security model"). An issue title is shown only when the issue was opened by an allowed account and no other account renamed it (the index reads each issue's rename history); otherwise the brief shows the number and "title not shown" with the reason.
 
 ## The local index
 
-`scripts/index.py` keeps a SQLite file at `<CLAUDE_PLUGIN_DATA>/<owner>__<repo>/index.sqlite`, or, when Claude Code has not set `CLAUDE_PLUGIN_DATA`, at `$XDG_CACHE_HOME/gh-issues-manager/<owner>__<repo>/index.sqlite` (by default under `~/.cache`). It is never kept in the project tree, which a cloned repository controls. It is derived from GitHub and never edited by hand; how it is protected is under "Safety" above and in [session-protocol.md](session-protocol.md), "Security model".
+`scripts/index.py` keeps a SQLite file at `<CLAUDE_PLUGIN_DATA>/private/<owner>__<repo>/index.sqlite`, or, when Claude Code has not set `CLAUDE_PLUGIN_DATA`, at `$XDG_CACHE_HOME/gh-issues-manager/private/<owner>__<repo>/index.sqlite` (by default under `~/.cache`). It is never kept in the project tree, which a cloned repository controls. It is derived from GitHub and never edited by hand; how it is protected is under "Safety" above and in [session-protocol.md](session-protocol.md), "Security model".
 
 | Command | Does |
 |---|---|
