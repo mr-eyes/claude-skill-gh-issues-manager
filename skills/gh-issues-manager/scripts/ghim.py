@@ -387,7 +387,7 @@ def labels_from_headings(text, profiles, intended=None):
                                 ", ".join(sorted({h for _, h in section_labels(profiles)})) or "(none)")))
             continue
         if len(candidates) > 1 and intended is not None:
-            chosen = [label for label in candidates if label in intended]
+            chosen = [label for label in candidates if label.lower() in {l.lower() for l in intended}]
             candidates = chosen or candidates
         if len(candidates) > 1:
             problems.append((number, "'## %s' is the heading of %s; name the profile or the intended labels"

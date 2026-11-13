@@ -220,18 +220,24 @@ def main(argv=None):
     if not done:
         # 3. Keep the former body as a comment, unless an earlier run already did.
         if found:
+            # Adopted, possibly in another layout: read it back and check that it still keeps this former body.
             url = found[0][0]["html_url"]
-            kept = comment if found[0][1] == args.note.strip() else record_comment(found[0][1], live)
+            match = re.search(r"#issuecomment-(\d+)", url)
+            parts = split_record(ghim.read_comment_body(repo, match.group(1))) if match else None
+            if not parts or parts[1] != ghim.normalize(live.replace("\r\n", "\n").replace("\r", "\n").strip("\n")):
+                print("stopped: the adopted record comment %s no longer keeps the former body; the body was not "
+                      "replaced" % url)
+                return 1
+            print("verified: record comment %s keeps the former body" % url)
         else:
             url = ghim.gh(["issue", "comment", str(args.issue), "--repo", repo, "--body-file", "-"],
                           stdin=comment).strip().split("\n")[-1]
-            kept = comment
             print("posted: %s" % url)
-        match = re.search(r"#issuecomment-(\d+)", url)
-        if not match or not ghim.verify_body(kept, ghim.read_comment_body(repo, match.group(1)),
-                                             "record comment %s" % url):
-            print("stopped: the record comment did not read back; the body was not replaced")
-            return 1
+            match = re.search(r"#issuecomment-(\d+)", url)
+            if not match or not ghim.verify_body(comment, ghim.read_comment_body(repo, match.group(1)),
+                                                 "record comment %s" % url):
+                print("stopped: the record comment did not read back; the body was not replaced")
+                return 1
 
         # 4. Replace the body, if it is still the one the record comment keeps.
         if ghim.normalize(ghim.read_issue_body(repo, args.issue)) != ghim.normalize(expected):

@@ -404,6 +404,8 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(["issue", "edit", "7", "--repo", "o/r", "--add-label", "a", "--remove-label", "b"],
                          ghim.label_command("o/r", 7, ["a"], ["b"]))
         self.assertEqual(([], []), ghim.label_changes(["RD:Results", "Final-Record"], ["rd:results"], ["research"]))
+        self.assertEqual((["ms:methods", "ms:results"], []),
+                         ghim.labels_from_headings(body, ["research", "manuscript"], intended=["MS:Results", "Ms:Methods"]))
         self.assertEqual(([], ["RD:Methods"]), ghim.label_changes(["RD:Methods"], [], ["research"]))
         plan = ghim.plan_section_labels(["final-record", "rel:fixed", "rd:results"], body, ["software", "research"])
         self.assertEqual(([], [], True), (plan["stop"], plan["foreign"], plan["checked"]))
@@ -922,6 +924,29 @@ class ConvertBodyTests(Sandbox):
         self.assertIn("found, not posted again", fixed.stdout)
         self.assertEqual(1, len(self.record_comments()))
         self.assertEqual(1, len(self.calls("issue comment")))
+
+    def test_record_comment_by_another_account_is_not_adopted(self):
+        record = "%s\n\nReplaced on 2026-03-08 09:00 PST by someone else.\n\n---\n\n%s" % (ghim.RECORD_HEADING, self.before)
+        data = self.repo()
+        data["comments"]["9050"] = {"issue": 10, "body": record, "user": "someone-else",
+                                    "created_at": "2026-03-08T17:00:00Z"}
+        self.save(data)
+        result = self.convert()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn("found, not posted again", result.stdout)
+        self.assertEqual(1, len(self.calls("issue comment")))
+        self.assertEqual(2, len(self.record_comments()))
+
+    def test_record_comment_in_another_layout_is_adopted(self):
+        record = "%s\n\nReplaced on 2026-03-08 09:00 PST.\n\n\n---\n\n%s\n\n" % (ghim.RECORD_HEADING, self.before)
+        data = self.repo()
+        data["comments"]["9050"] = {"issue": 10, "body": record, "created_at": "2026-03-08T17:00:00Z"}
+        self.save(data)
+        result = self.convert()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("verified: record comment https://github.com/example-org/tinycsv/issues/10#issuecomment-9050 "
+                      "keeps the former body", result.stdout)
+        self.assertEqual([], self.calls("issue comment"))
 
     def test_record_comment_that_does_not_read_back_stops_the_run(self):
         result = self.convert(env={"FAKE_GH_CORRUPT": "1"})
