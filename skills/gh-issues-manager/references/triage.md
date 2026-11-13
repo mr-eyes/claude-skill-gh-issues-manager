@@ -4,9 +4,9 @@ People open issues by hand: a bug, a question, a task, a documentation fix, an i
 
 ## Detection
 
-An open issue with no role label (`hub`, `final-record`, `active`, `triage`) and no closed-out type (`type:duplicate`, `type:out-of-scope`) needs triage. `index.py query triage` lists them, the SessionStart brief adds one line, "N issues need triage: #a, #b", and the `record-auditor` agent reports them. Issues created by the skill's scripts always carry a role label.
+An open issue needs triage when it carries the `triage` label, or when it has no role label (`hub`, `final-record`, `active`), no closed-out type (`type:duplicate`, `type:out-of-scope`) and no triage comment yet from an allowed account. A triaged issue may stay open without a role label, for example a question waiting for its answer; it is listed again only when someone adds the `triage` label. `index.py query triage` lists them, the SessionStart brief adds one line, "N issues need triage: #a, #b", and the `record-auditor` agent reports them. Issues created by the skill's scripts always carry a role label.
 
-The optional workflow `.github/workflows/ghim-triage.yml` (from `templates/ghim-triage.yml`, written by `setup.py apply` when the user asks) adds the `triage` label to any issue opened without a role label, so the flag appears even when no session runs. It uses only the default `GITHUB_TOKEN` with permission to write issues, reads no title or body, and never edits one.
+The optional workflow `.github/workflows/ghim-triage.yml` (from `templates/ghim-triage.yml`, written by `setup.py apply` when the user asks) adds the `triage` label to any issue opened without a role label, so the flag appears even when no session runs. It uses only the default `GITHUB_TOKEN` with permission to write issues, reads no title or body, and never edits one. A workflow acts only on the repository it is committed to: for a record kept in another repository, commit it there.
 
 ## Classification
 

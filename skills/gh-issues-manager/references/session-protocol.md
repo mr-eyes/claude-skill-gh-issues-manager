@@ -26,7 +26,7 @@ If the owner gives an instruction that conflicts with the resume block's holds, 
 
 ## The audit
 
-At the end of a work stretch, before a release and before compiling, run the `record-auditor` agent. It is read-only and returns a list for the main session to act on: commits, merged pull requests and finished work with no event comment (`catchup.py gap`); bodies older than their newest relevant event; hub lists out of date; section labels that disagree with headings; `active` issues with no activity; issues that need triage; and new deliverable signals the setup does not cover, to be put to the user once as a question.
+At the end of a work stretch, before a release and before compiling, run the `record-auditor` agent. It is read-only by instruction and returns a list for the main session to act on: commits, merged pull requests and finished work with no event comment (`catchup.py gap`); bodies older than their newest relevant event; hub lists out of date; section labels that disagree with headings; `active` issues with no activity; issues that need triage; and new deliverable signals the setup does not cover, to be put to the user once as a question.
 
 ## End of a working stretch
 

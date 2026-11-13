@@ -1,5 +1,5 @@
 {
-  "description": "Inject the project's record brief from GitHub issues: at session start, resume, clear, compaction and fork; into every subagent; as one line on user prompts when it changed; and as instructions for the compaction summary. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository.",
+  "description": "Inject the project's record brief from GitHub issues: at session start, resume, clear, compaction and fork; into every subagent; as one line on user prompts when it changed; and as instructions for the compaction summary. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository, except for one fixed line at session start, once per project, in the top folder of a git checkout with a GitHub remote and no setup, offering to set up the record.",
   "hooks": {
     "SessionStart": [
       {

@@ -118,7 +118,7 @@ The resume block is small on purpose (under 4,000 characters) and a new one is p
 
 ## The agents
 
-The plugin adds three agents for bulk and audit work, one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts topic bodies in batches to files only; `record-reviewer` reviews drafts read-only, per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals. Each preloads the skill and uses your default model; to choose another, copy its file into the project's `.claude/agents/` and set `model:`.
+The plugin adds three agents for bulk and audit work, one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts topic bodies in batches to files only; `record-reviewer` reviews drafts, per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals. The drafter has no shell and no GitHub access. The reviewer and the auditor are read-only by instruction: they need Bash for read commands such as `gh issue view` and `git log`, so their tool list does not enforce it, and the main session checks what they did. Each preloads the skill and uses your default model; to choose another, copy its file into the project's `.claude/agents/` and set `model:`.
 
 ## The hooks and the CLAUDE.md snippet
 

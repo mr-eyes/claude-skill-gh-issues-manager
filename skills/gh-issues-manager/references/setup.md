@@ -11,7 +11,7 @@ A project's goal usually does not exist as files yet (a manuscript is written du
 
 ## How it runs
 
-1. `python3 scripts/setup.py detect` (read-only, local). It looks only at file and folder names at the top of the project and one level down, and prints suggestions with their evidence, for example "suggested: software, because pyproject.toml, tests/". An empty project gets no suggestion.
+1. `python3 scripts/setup.py detect` (read-only, local). It looks only at file and folder names at the top of the project and one level down, and prints suggestions with their evidence, for example "suggested: software (profile software), because pyproject.toml, tests/". An empty project gets no suggestion. In a large folder it stops after the first few hundred names.
 2. Ask the questions below with the session's multiple-choice question tool, a few at a time, each with an "other" answer. Pre-select what detection suggested and show its evidence next to it.
 3. Show a summary of all answers and ask for one final confirmation. Nothing is written before it.
 4. Write the answers to a file, then run `python3 scripts/setup.py apply --answers <file> --dry-run`, show its output, and run it again with `--yes`.
@@ -41,17 +41,20 @@ An answers file:
  "triage_workflow": true, "claude_md": true, "prompt_hook": {"enabled": true, "every": 10}, "trust": true}
 ```
 
-`setup.py` checks every value against a strict form (names, headings, numbers in range) and refuses the file otherwise.
+`setup.py` checks every value against a strict form (names, headings, numbers in range) and refuses the file otherwise. Each kind is listed once; a second deliverable of a kind is kind `other` with its own name. Section headings must be distinct (ignoring case), give distinct labels, and may not be "Sources", which is the sources table of every body. A deliverable of kind `other` keeps its name in the setup, and its labels start with that name (`sec:lab-handbook-safety`), so two such deliverables never share a label. When `apply` runs again on an existing setup, the values it keeps (time zone, topics, decision makers, profiles, hub) must fit the same forms; otherwise it stops and names them.
 
 ## What `apply` does
 
+- Checks first that none of the files it may write (the setup file, the hub drafts, the workflow, `CLAUDE.md`) or the folders on the way to them is a symlink, and stops before any change if one is. Each file is written through a fresh temporary file in its folder, then moved into place.
 - Writes `.gh-issues-manager.json`: the repository, the profiles (a profile with edited sections is stored with its section labels and headings), topics, decision makers, time zone and options.
 - Creates the labels: role labels, the core `type:` labels, the chosen profiles' section and type labels, and topic labels.
 - Creates the hub with its deliverable tables in the chosen order and posts its first resume comment, for a project that has no hub yet.
-- Adds the repository to the user's trusted list when `trust` is true.
-- Writes `.github/workflows/ghim-triage.yml` and the CLAUDE.md snippet when asked for.
+- Adds the repository to the user's trusted list when `trust` is true; with `false`, the list is not touched.
+- Writes `.github/workflows/ghim-triage.yml` when asked for and the record is this repository's issues. A workflow acts only on the repository it is committed to, so for a record in another repository (`record`: `other` or `new`) `apply` writes nothing and says to commit `templates/ghim-triage.yml` in the record repository.
+- Writes the CLAUDE.md snippet when asked for.
 - Runs the first `index.py sync` in the foreground, so the first session already has a brief.
+- Records the kinds of deliverable that the project's files already suggest, so the hooks mention only what appears later.
 
 ## Later changes
 
-The deliverable can change mid-project. Run `apply` again with the new answers: it adds profiles, sections and labels and never removes what is there; for an existing hub it prints the table rows to add, for the session to post with `post_verified.py body`. The SessionStart brief and the `record-auditor` agent notice when files suggest a deliverable the setup does not cover (for example the first `.tex` file in a project set up only for software) and ask once whether to add it.
+The deliverable can change mid-project. Run `apply` again with the new answers: it adds profiles, sections and labels and never removes what is there; for an existing hub it prints the table rows to add, for the session to post with `post_verified.py body`. The SessionStart brief and the `record-auditor` agent notice when files suggest a deliverable the setup does not cover (for example the first `.tex` file in a project set up only for software) and ask once whether to add it. Files present when `apply` ran, and the plugin's own workflow file, never cause that line.

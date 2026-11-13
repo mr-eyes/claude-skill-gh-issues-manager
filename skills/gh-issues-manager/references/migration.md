@@ -77,7 +77,7 @@ Draft each from `templates/pointer-comment.md`. In a comment posted to another r
 Bulk drafting and review use the plugin's agents; the main session stays the only writer to GitHub.
 
 1. Draft: the `record-drafter` agent takes a batch of about four issues and writes draft bodies to files only, with a notes file per batch listing what it moved out of each body and why, conflicts between sources, and owner questions.
-2. Review: the `record-reviewer` agent, which has not seen the drafter's reasoning, audits the batch read-only: dropped limitations first, then statements firmer than their source, numbers and denominators, the rules of the body and the source paths. It returns findings with exact replacement text.
+2. Review: the `record-reviewer` agent, which has not seen the drafter's reasoning, audits the batch, read-only by instruction: dropped limitations first, then statements firmer than their source, numbers and denominators, the rules of the body and the source paths. It returns findings with exact replacement text.
 3. Fix: the main session applies the findings to the drafts, or records why it does not.
 4. Cross-issue review: when all batches are drafted, `record-reviewer` in its cross-issue mode checks all bodies together for shared numbers, terms, `#N` pointers and contradictions.
 5. Post: the main session posts each body with `convert_body.py` or `post_verified.py body`, with read-back.

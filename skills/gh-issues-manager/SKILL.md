@@ -109,7 +109,7 @@ When the plugin arrives in a project with months of work, or after a stretch wit
 
 ### Bulk work with the agents
 
-The plugin's agents work one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts bodies in batches of about four issues to files only; `record-reviewer` reviews drafts read-only, per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals at the end of a stretch, before a release or before compiling. Batch workflow: [references/migration.md](references/migration.md); audit: [references/session-protocol.md](references/session-protocol.md).
+The plugin's agents work one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts bodies in batches of about four issues to files only; `record-reviewer` reviews drafts (read-only by instruction), per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals at the end of a stretch, before a release or before compiling. Batch workflow: [references/migration.md](references/migration.md); audit: [references/session-protocol.md](references/session-protocol.md).
 
 ### Migrate an older tracker
 
