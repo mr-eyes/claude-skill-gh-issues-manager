@@ -151,36 +151,93 @@ def run(event, data, budget):
     return ""
 
 
+BUILDING = ("gh-issues-manager: record brief not shown: building the local index in the background (first run); "
+            "the brief appears at your next prompt. Run hooks.py --doctor for status.")
+
+
+def open_usable(repo):
+    """The index when it can be used for a brief, else None. Raises storage.StorageError for unsafe storage."""
+    try:
+        db = index.connect(repo, create=False)
+    except index.RefusedIndex:
+        return None  # a sync moves it aside and builds a new one
+    if db is not None and not index.get_meta(db, "synced_at"):
+        db.close()
+        return None
+    return db
+
+
+def start_background(repo, config):
+    """Start the detached background sync unless one is running. Returns "started" or "running"."""
+    import subprocess
+    if index.running(repo):
+        return "running"
+    storage.folder(storage.cache_top(), storage.repo_folder(repo))
+    budget = index.background_budget(config)
+    if not index.take_lock(repo, budget):  # taken here, so a second hook sees it at once
+        return "running"
+    log = index.background_files(repo)["log"]
+    index.log_line(repo, "starting background sync from a hook")
+    descriptor = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        child = subprocess.Popen(
+            [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.py"), "--repo", repo,
+             "sync", "--background", "--lock-held", "--deadline", str(budget)],
+            cwd=ghim.project_root(), stdin=subprocess.DEVNULL, stdout=descriptor, stderr=descriptor,
+            start_new_session=True, close_fds=True)
+    finally:
+        os.close(descriptor)
+    index.hand_lock(repo, child.pid, budget)
+    return "started"
+
+
 def produce(event, data, budget, config, repo, hub):
+    session = str(data.get("session_id") or "")
+    db = open_usable(repo)
     fresh, failure = None, ""
     if event == "session-start":
-        share = max(1.0, budget / 2.0)  # the sync gets half the budget; the rest is for the brief
-        try:
-            with alarm(share + 0.5):
-                index.sync(repo, hub, timeout=share, deadline=share, timeline_cap=10, log=lambda *a: None)
-            fresh = True
-        except storage.StorageError:
-            raise
-        except Exception as error:  # noqa: BLE001 - the cached index is used
-            fresh = False
-            slow = isinstance(error, OutOfTime) or "timed out" in str(error) or "deadline" in str(error)
-            failure = "GitHub could not be read (%s)" % ("timed out" if slow else "gh failed"
-                                                         if isinstance(error, ghim.GhError) else type(error).__name__)
-    db = index.connect(repo, create=False)  # raises for an index that must not be read
-    if db is None or not index.get_meta(db, "synced_at"):
-        if db is not None:
-            db.close()
-        raise Unavailable("there is no local index yet%s" % (" and " + failure if failure else
-                                                              "; the next session start fills it"))
+        if db is None:
+            start_background(repo, config)
+            remember(repo, session, None, brief=False)
+            return BUILDING
+        db.close()
+        if index.running(repo):
+            fresh = None  # a background sync is writing the index; use it as it is
+        else:
+            share = max(1.0, budget / 2.0)  # the sync gets half the budget; the rest is for the brief
+            try:
+                with alarm(share + 0.5):
+                    summary = index.sync(repo, hub, timeout=share, deadline=share, timeline_cap=10, log=lambda *a: None)
+                fresh = True
+                if not summary["complete"]:
+                    start_background(repo, config)  # a large backlog catches up without blocking sessions
+            except storage.StorageError:
+                raise
+            except Exception as error:  # noqa: BLE001 - the cached index is used
+                fresh = False
+                slow = isinstance(error, OutOfTime) or "timed out" in str(error) or "deadline" in str(error)
+                failure = "GitHub could not be read (%s)" % ("timed out" if slow else "gh failed"
+                                                             if isinstance(error, ghim.GhError) else
+                                                             type(error).__name__)
+                if slow:
+                    start_background(repo, config)
+        db = open_usable(repo)
+        if db is None:
+            start_background(repo, config)
+            remember(repo, session, None, brief=False)
+            return BUILDING
+    elif db is None:
+        if event == "subagent-start" and index.running(repo):
+            return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": BUILDING}})
+        raise Unavailable("there is no local index yet; the next session start builds it")
     try:
         if failure:
             index.set_meta(db, "last_sync_error", "%s at %s" % (failure, index.now_utc()))
             db.commit()
         record = brief.Record(db, config, repo)
-        session = str(data.get("session_id") or "")
         if event == "session-start":
             text = brief.session_payload(record, fresh)
-            remember(repo, session, digest(record.key()), injected=True)
+            remember(repo, session, digest(record.key()), brief=True)
             return text
         if event == "subagent-start":
             return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
@@ -195,10 +252,16 @@ def produce(event, data, budget, config, repo, hub):
         state = load_state(repo)
         entry = state.get(session, {"count": 0, "key": None})
         entry["count"] = entry.get("count", 0) + 1
+        entry["seen"] = time.time()
+        if entry.get("brief") is not True:
+            # The session started without a brief (first build, or no SessionStart): give the full brief once.
+            entry.update(brief=True, key=key)
+            state[session] = entry
+            save_state(repo, state)
+            return brief.session_payload(record, None)
         show = entry.get("key") != key or entry["count"] % every == 0
         if show:
             entry["key"] = key
-        entry["seen"] = time.time()
         state[session] = entry
         save_state(repo, state)
         return brief.prompt_payload(record) if show else ""
@@ -206,11 +269,13 @@ def produce(event, data, budget, config, repo, hub):
         db.close()
 
 
-def remember(repo, session, key, injected):
+def remember(repo, session, key, brief):
+    """Record in the session's state whether it got the full brief, and the fingerprint it saw."""
     try:
         state = load_state(repo)
         entry = state.get(session, {"count": 0})
-        if injected:
+        entry["brief"] = brief
+        if brief:
             entry["key"] = key
         entry["seen"] = time.time()
         state[session] = entry
@@ -312,7 +377,7 @@ def doctor():
         print("index: synced %s (%s)%s; %s" % (synced or "never", index.age_text(synced),
                                                "" if index.get_meta(db, "sync_complete") != "0" else ", incomplete",
                                                ", ".join("%s %d" % item for item in index.describe_index(db).items())))
-        moved = index.get_meta(db, "moved_aside")
+        moved = index.get_meta(db, "moved_aside") if db is not None else ""
         if moved:
             print("an earlier index was refused and moved aside to %s" % moved)
         failure = index.get_meta(db, "last_sync_error")
@@ -324,6 +389,23 @@ def doctor():
         else:
             problems.append("the index was never filled")
         db.close()
+    try:
+        active, last, error_line = index.background_status(repo)
+    except storage.StorageError as error:
+        active, last, error_line = None, None, "unreadable: %s" % error
+    if active:
+        print("background sync: running (pid %d, started %s UTC, budget %d s)"
+              % (int(active["pid"]), time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(active["started"])),
+                 int(active["budget"])))
+    else:
+        print("background sync: not running")
+    if last:
+        print("last background sync: finished %s, %s" % (index.clean(last.get("finished"), 40),
+                                                          index.clean(last.get("result"), 120)))
+    else:
+        print("last background sync: none recorded")
+    if error_line:
+        print("last error line of the sync log: %s" % index.clean(error_line, 300))
     for problem in problems:
         print("problem: %s" % problem)
     print("result: %s" % ("the hooks can show the brief" if not problems else "%d problem(s) above" % len(problems)))
