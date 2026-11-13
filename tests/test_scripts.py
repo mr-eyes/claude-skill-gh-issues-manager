@@ -90,17 +90,18 @@ class Sandbox(unittest.TestCase):
             except (OSError, ValueError, KeyError):
                 pass
 
-    def run_script(self, name, *args, gh=FAKE, env=None, cwd=None):
+    def run_script(self, name, *args, gh=FAKE, env=None, cwd=None, umask=None):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "CLAUDE_PROJECT_DIR", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA",
-                         "GHIM_DATA_HOME"):
+                         "GHIM_DATA_HOME", "GHIM_TESTING"):
             full_env.pop(variable, None)
         full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
         full_env["GHIM_TRUSTED_FILE"] = os.path.join(self.dir, "no-trusted-file")
         full_env.update(env or {})
         command = [sys.executable, os.path.join(SCRIPTS, name)] + list(args)
-        return subprocess.run(command, capture_output=True, text=True, env=full_env, cwd=cwd or self.dir)
+        return subprocess.run(command, capture_output=True, text=True, env=full_env, cwd=cwd or self.dir,
+                              preexec_fn=None if umask is None else (lambda: os.umask(umask)))
 
     def repo(self):
         with open(self.state, encoding="utf-8") as handle:
@@ -1119,7 +1120,7 @@ class ResumeBlockTests(Sandbox):
     def run_hook(self, cwd=None, gh=FAKE, env=None):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
         for variable in ("GHIM_CONFIG", "CLAUDE_PROJECT_DIR", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA",
-                         "GHIM_DATA_HOME"):
+                         "GHIM_DATA_HOME", "GHIM_TESTING"):
             full_env.pop(variable, None)
         full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
@@ -1468,8 +1469,9 @@ class RecordSandbox(Sandbox):
         self.config = {"repo": REPO, "hub": 4, "profiles": ["software", "research"]}
         self.write_config(self.config)
         self.trusted = self.write("trusted-repos", "%s octo-dev\n" % REPO)
-        self.data = os.path.join(self.dir, "plugin-data")
-        self.env = {"CLAUDE_PROJECT_DIR": self.project, "GHIM_DATA_HOME": self.data,
+        self.data_home = os.path.join(self.dir, "data-home")  # test-only storage: $GHIM_DATA_HOME/gh-issues-manager
+        self.data = os.path.join(self.data_home, "gh-issues-manager")
+        self.env = {"CLAUDE_PROJECT_DIR": self.project, "GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1",
                     "GHIM_TRUSTED_FILE": self.trusted, "GHIM_HOOK_TIMEOUT": "60"}
 
     def write_config(self, config):
@@ -1495,7 +1497,7 @@ class RecordSandbox(Sandbox):
 
     def tool(self, name, *args, env=None, gh=FAKE, stdin=None):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
-        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA", "GHIM_DATA_HOME"):
+        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA", "GHIM_DATA_HOME", "GHIM_TESTING"):
             full_env.pop(variable, None)
         full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
@@ -1506,7 +1508,7 @@ class RecordSandbox(Sandbox):
 
     def hook(self, event, session="s1", env=None, gh=FAKE):
         full_env = dict(os.environ, GHIM_GH=gh, FAKE_GH_STATE=self.state, PYTHONDONTWRITEBYTECODE="1")
-        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA", "GHIM_DATA_HOME"):
+        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA", "GHIM_DATA_HOME", "GHIM_TESTING"):
             full_env.pop(variable, None)
         full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
@@ -1601,7 +1603,7 @@ class IndexTests(RecordSandbox):
         self.tool("index.py", "sync", "--rebuild")
         fresh = [self.query(*q) for q in (("timeline",), ("consistency",), ("impact", "--commit", "4f2a9c1"))]
         self.assertEqual(incremental, fresh)
-        self.env["GHIM_DATA_HOME"] = self.data
+        self.env["GHIM_DATA_HOME"] = self.data_home
         rebuilt = self.tool("index.py", "sync", "--rebuild")
         self.assertIn("7 issues", rebuilt.stdout)
         self.assertEqual(incremental, [self.query(*q) for q in (("timeline",), ("consistency",),
@@ -1770,6 +1772,34 @@ class StorageTests(RecordSandbox):
             os.chmod(folder, 0o700)  # tidy permissions, so that only the missing mark can be the reason to refuse
         os.chmod(path, 0o600)
 
+    def test_the_test_storage_folder_needs_both_test_variables(self):
+        del self.env["GHIM_TESTING"]  # GHIM_DATA_HOME alone is ignored
+        self.ready()
+        self.assertFalse(os.path.lexists(self.data_home))
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-cache", "gh-issues-manager", "private",
+                                                    "example-org__tinycsv", "index.sqlite")))
+        self.env["GHIM_TESTING"] = "1"
+        self.ready()
+        self.assertTrue(os.path.isfile(os.path.join(self.data_home, "gh-issues-manager", "private",
+                                                    "example-org__tinycsv", "index.sqlite")))
+
+    def test_a_relative_config_folder_or_trusted_file_is_not_used(self):
+        self.ready()
+        del self.env["GHIM_TRUSTED_FILE"]
+        planted = os.path.join(self.project, "rel", "gh-issues-manager")
+        os.makedirs(planted)
+        for path in (os.path.join(planted, "trusted-repos"), os.path.join(self.project, "rel-trusted")):
+            with open(path, "w") as handle:
+                handle.write("%s octo-dev\n" % REPO)  # a project could ship these
+        home = os.path.join(self.dir, "home")
+        os.makedirs(home)
+        for env in ({"XDG_CONFIG_HOME": "rel", "HOME": home},
+                    {"XDG_CONFIG_HOME": "rel", "GHIM_TRUSTED_FILE": "rel-trusted", "HOME": home}):
+            self.assertEqual("", self.hook("session-start", env=env).stdout, env)  # not trusted: silent
+            doctor = self.tool("hooks.py", "--doctor", env=env).stdout
+            self.assertIn("trusted: no (trusted list: %s" % os.path.join(home, ".config", "gh-issues-manager",
+                                                                          "trusted-repos"), doctor)
+
     def test_index_goes_to_the_user_cache_never_the_project_or_the_plugin_data_folder(self):
         del self.env["GHIM_DATA_HOME"]
         claude_data = os.path.join(self.dir, "claude-plugin-data")
@@ -1889,13 +1919,13 @@ class StorageTests(RecordSandbox):
         self.assertIn("is a symlink", self.tool("index.py", "status").stderr)
         self.assertNotEqual(0, self.tool("index.py", "sync").returncode)
 
-    def test_a_loose_plugin_data_folder_made_by_claude_code_is_tightened(self):
-        parent = os.path.join(self.dir, "claude-plugins-data")
-        os.makedirs(os.path.join(parent, "gh-issues-manager-inline"))
-        self.data = os.path.join(parent, "gh-issues-manager-inline")
+    def test_a_loose_top_folder_is_tightened_and_nothing_above_it(self):
+        parent = os.path.join(self.dir, "loose-home")
+        os.makedirs(os.path.join(parent, "gh-issues-manager"))
+        self.data = os.path.join(parent, "gh-issues-manager")
         os.chmod(parent, 0o775)
         os.chmod(self.data, 0o775)
-        self.env["GHIM_DATA_HOME"] = self.data
+        self.env["GHIM_DATA_HOME"] = parent  # the plugin names and tightens only parent/gh-issues-manager
         self.ready()
         session = self.hook("session-start").stdout
         self.assertIn("(read from GitHub just now)", session)
@@ -2102,7 +2132,7 @@ class GuardTests(RecordSandbox):
         shared = os.path.join(self.dir, "shared")
         os.makedirs(shared)
         os.chmod(shared, 0o777)
-        self.env["GHIM_DATA_HOME"] = os.path.join(shared, "data")
+        self.env["GHIM_DATA_HOME"] = shared
         notice = self.hook("session-start").stdout
         self.assertIn("the local storage was refused (the storage folder is in a folder that others can write to)",
                       notice)
@@ -2331,7 +2361,8 @@ class RecoveryTests(RecordSandbox):
     def test_only_one_process_takes_the_lock(self):
         import multiprocessing
         import index as index_module
-        environment = {"GHIM_DATA_HOME": self.data, "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
+        environment = {"GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1",
+                       "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
                        "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache")}
         saved = {k: os.environ.get(k) for k in environment}
         os.environ.update(environment)
@@ -2600,7 +2631,7 @@ class DiscoveryTests(RecordSandbox):
         import setup
         from unittest import mock
         calls = []
-        env = {"GHIM_DATA_HOME": self.data, "CLAUDE_PROJECT_DIR": self.project,
+        env = {"GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1", "CLAUDE_PROJECT_DIR": self.project,
                "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache")}
         everything = dict(self.config, profiles=["manuscript", "thesis", "software", "dataset", "research",
                                                  "prototyping", "proposal", "docs"])
@@ -2820,10 +2851,10 @@ class SetupTests(Sandbox):
                     handle.write("x\n")
         return root
 
-    def setup_script(self, *args, gh="false", env=None):
+    def setup_script(self, *args, gh="false", env=None, umask=None):
         environment = {"GHIM_TRUSTED_FILE": os.path.join(self.dir, "trusted-repos")}  # a terminal: no plugin data
         environment.update(env or {})
-        return self.run_script("setup.py", *args, gh=gh, env=environment)
+        return self.run_script("setup.py", *args, gh=gh, env=environment, umask=umask)
 
     def answers(self, name, **changes):
         return self.write("answers-%s.json" % name, json.dumps(dict(self.ANSWERS[name], **changes)))
@@ -2905,7 +2936,7 @@ class SetupTests(Sandbox):
                    GHIM_TRUSTED_FILE=os.path.join(self.dir, "trusted-repos"), GHIM_HOOK_TIMEOUT="60",
                    XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                    XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
-        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "GHIM_DATA_HOME"):
+        for variable in ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "GHIM_DATA_HOME", "GHIM_TESTING"):
             env.pop(variable, None)
         payload = json.dumps({"hook_event_name": "session-start", "session_id": "s1", "cwd": root})
         return subprocess.run(["bash", os.path.join(SCRIPTS, "run_hook.sh"), "session-start"], input=payload,
@@ -2973,7 +3004,15 @@ class SetupTests(Sandbox):
                 result = self.setup_script("apply", "--answers", self.answers("single"), "--root", root, mode, gh=FAKE)
                 self.assertNotEqual(0, result.returncode, (name, mode))
                 self.assertIn("is a symlink", result.stderr, (name, mode))
+                self.assertEqual(name == "drafts", "pass --drafts <folder>" in result.stderr, (name, mode))
             self.assertEqual(sorted([link]), sorted(os.listdir(root)), name)  # stopped before any change
+        # A folder whose name starts with two dots is inside the project, and is checked like any other.
+        root = self.project()
+        os.symlink(outside, os.path.join(root, "..drafts"))
+        dotted = self.setup_script("apply", "--answers", self.answers("single"), "--root", root, "--dry-run",
+                                   "--drafts", os.path.join(root, "..drafts", "hub"))
+        self.assertNotEqual(0, dotted.returncode)
+        self.assertIn("..drafts is a symlink", dotted.stderr)
         self.assertEqual("keep\n", ghim.read_text(victim))
         self.assertEqual([], os.listdir(outside))
         # A planted temporary name is not used: the setup file is written through a fresh temporary file.
@@ -2986,11 +3025,34 @@ class SetupTests(Sandbox):
         self.assertEqual("keep\n", ghim.read_text(victim))
         config = os.path.join(root, ghim.CONFIG_NAME)
         self.assertTrue(os.path.isfile(config) and not os.path.islink(config))
-        self.assertEqual(0o644, os.stat(config).st_mode & 0o777)
+        mask = os.umask(0)
+        os.umask(mask)
+        self.assertEqual(0o666 & ~mask, os.stat(config).st_mode & 0o777)  # a new file follows the umask
         self.assertEqual([], [n for n in os.listdir(root) if n.startswith(".part-")])
         # trust is false in these answers: a missing trusted list stays missing
         self.assertIn("trusted: not changed", result.stdout)
         self.assertFalse(os.path.lexists(os.path.join(self.dir, "trusted-repos")))
+
+    def test_new_files_follow_the_umask_and_existing_files_keep_their_mode(self):
+        root = self.project()
+        claude = os.path.join(root, "CLAUDE.md")
+        with open(claude, "w") as handle:
+            handle.write("# Notes\n")
+        os.chmod(claude, 0o600)
+        env = {"XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "CLAUDE_PROJECT_DIR": root}
+        result = self.setup_script("apply", "--answers", self.answers("single"), "--root", root, "--yes", gh=FAKE,
+                                   env=env, umask=0o077)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("## Project record", ghim.read_text(claude))
+        self.assertEqual(0o600, os.stat(claude).st_mode & 0o777)  # existing: its mode is kept
+        for new in (ghim.CONFIG_NAME, os.path.join(".github", "workflows", "ghim-triage.yml"),
+                    os.path.join(".tmp", "gh-issues-manager-setup", "hub.md")):
+            self.assertEqual(0o600, os.stat(os.path.join(root, new)).st_mode & 0o777, new)  # umask 077
+        os.chmod(claude, 0o640)
+        again = self.setup_script("apply", "--answers", self.answers("single", claude_md=False), "--root", root,
+                                  "--yes", gh=FAKE, env=env, umask=0o022)
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertEqual(0o600, os.stat(os.path.join(root, ghim.CONFIG_NAME)).st_mode & 0o777)  # rewritten, kept
 
     def test_the_labeler_goes_only_into_the_record_repository(self):
         for record in ("other", "new"):
