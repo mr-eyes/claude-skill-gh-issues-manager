@@ -37,6 +37,8 @@ Do this at the start of every session and again whenever the context was compact
 
 When GitHub is unreachable, read the newest local snapshot instead and say that it is a copy with its date. Details and the end-of-stretch routine: [references/session-protocol.md](references/session-protocol.md).
 
+With the plugin installed, hooks do part of this for you: at every session start, resume, clear, compaction and fork a record brief (rules, hub, deliverable topics, active issues, issues that need triage, resume block) enters the context, every subagent gets a short brief, user prompts get a one-line reminder when it changed, and compaction is told what to keep. The brief is not the skill: invoke this skill before writing anything to the record. Details, the local index behind the hooks and `compile.py`: [references/hooks-and-index.md](references/hooks-and-index.md).
+
 ## The model in brief
 
 | Piece | What it is |
@@ -67,7 +69,7 @@ Step-by-step with commands: [references/bootstrap.md](references/bootstrap.md).
 Do this when an experiment finishes, a decision is made, something fails or a change is merged. Do it then, not at the end of the day.
 
 1. Pick the topic issue. If none fits, create a final record for the new topic first and add it to the hub.
-2. Copy the matching comment template to a draft file and fill every field. "None" with a reason is a valid entry; an empty field is not.
+2. Copy the matching comment template to a draft file and fill every field. "None" with a reason is a valid entry; an empty field is not. Its first line is the event marker, `<!-- ghim:event type=<type> at=<ISO time with offset> -->`, at the same local time as the heading.
 3. Check every number against the file it comes from. Never from memory.
 4. For anything that will be cited or acted on, have an independent reviewer (a fresh agent that has not seen your reasoning) try to break the draft against the sources.
 5. `python3 ${CLAUDE_SKILL_DIR}/scripts/post_verified.py comment --issue N --kind <kind> --body-file <draft> --dry-run`, then for real. It lints, posts and compares the stored comment with the draft.
@@ -91,7 +93,7 @@ Before stopping, before a long-running command, and whenever the context is gett
 
 ### Prepare a deliverable
 
-Work from the hub's deliverable-section tables, section by section. For each listed issue take the text under that section's heading in its body, and nothing else: bodies are the text, comments are history. Check first that every body reflects its newest comments, and that the same quantity has the same value, denominator and source in every body. See [references/deliverables.md](references/deliverables.md).
+Work from the hub's deliverable-section tables, section by section. For each listed issue take the text under that section's heading in its body, and nothing else: bodies are the text, comments are history. Check first that every body reflects its newest comments, and that the same quantity has the same value, denominator and source in every body. `python3 ${CLAUDE_SKILL_DIR}/scripts/compile.py --out <folder>` assembles the sections in the hub's order, the figure, table and source lists, and the full dated timeline. See [references/deliverables.md](references/deliverables.md).
 
 ### Migrate an older tracker
 
@@ -126,6 +128,9 @@ Why each rule exists, with the Mermaid and GitHub limits: [references/pitfalls.m
 | `convert_body.py` | Replace a record body of an older form with deliverable text: live-body check, the former body kept as a comment, body and labels replaced and read back | yes, `--dry-run` available |
 | `resume_block.py` | `show` prints the newest resume comment by an allowed account, for trusted repositories only; `update` posts a new resume comment and reads it back | `update` only, `--dry-run` available |
 | `snapshot.py` | Save all issues and comments as local Markdown with an index | no |
-| `session_start_hook.sh` | SessionStart hook that prints the newest allowed resume comment | no |
+| `index.py` | Local SQLite index of the record: `sync` from GitHub; `query` consistency, impact, timeline, triage, brief | no (reads) |
+| `hooks.py`, `run_hook.sh` | The four hooks: SessionStart, SubagentStart, UserPromptSubmit, PreCompact; `hooks.py --print` shows the payloads | no |
+| `compile.py` | The deliverable by section, figure, table and source lists, the dated timeline and a manifest, from the record | no (reads) |
+| `session_start_hook.sh` | SessionStart hook; calls `run_hook.sh session-start` | no |
 
 Run any script with `--help` for its options.

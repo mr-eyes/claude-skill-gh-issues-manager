@@ -58,6 +58,8 @@ What the text may and may not hold:
 | A design choice with a one-sentence reason | Decision tables or the story of a decision |
 | A limitation stated as a property of the final method or result | The story of a failed attempt |
 | Sub-headings (`###`) inside a section, not named like a section heading | Open work, next steps, provenance, links to older trackers, job identifiers |
+| A figure block: `### Figure: <id> - <title>`, a caption, and the image embedded from a committed path at a commit or tag (`![text](https://github.com/<owner>/<repo>/blob/<commit or tag>/<path>?raw=true)`), with a Sources row `Figure <id>` naming the data file and the exact command | An image linked from a branch, which can change under the text |
+| A table block: `### Table: <id> - <title>`, a caption, and a Markdown table or a link to a committed file, with a Sources row `Table <id>` | A table whose numbers have no source |
 
 The linter enforces what it can see: no "As of" line followed by a date, month or year, no date and time in the text, no `<details>` block, no heading for decisions, open work, provenance, next steps or the other sections of the older record form, no dated heading outside "Sources", "Sources" last, no line that looks like a section heading but is not one, and section headings that agree with the issue's labels. It cannot see a job identifier, a missing denominator or a commit outside "Sources"; review catches those.
 
@@ -79,7 +81,14 @@ An event is something that happened and will matter later. Each one becomes a da
 | Checkpoint | A working stretch ends with work in flight | `templates/comment-checkpoint.md` |
 | Correction | A posted statement or number was wrong | `templates/comment-correction.md` |
 
-Every event comment starts with `### <Kind>: <date time zone> - <title>`, so the comment list of an issue reads as a timeline. A merged change is recorded as a result comment whose "What ran" names the pull request and commit.
+Every event comment starts with a machine-readable marker line, then its heading:
+
+```
+<!-- ghim:event type=result at=2026-03-04T14:10-08:00 -->
+### Result: 2026-03-04 14:10 PST - first speed benchmark
+```
+
+The heading keeps the comment list of an issue readable as a timeline; the marker gives the type and the time with its offset, so the index and `compile.py` can order every event of the project exactly. Both carry the same local date and time, and the linter checks that they agree. The comment that keeps a former body during a conversion carries `type=record`. Resume comments keep their own heading first and have no marker, because the trust check reads that heading. A merged change is recorded as a result comment whose "What ran" names the pull request and commit.
 
 Comments are append-only. They are the history: results, decisions with the decider's exact words, failures, corrections. The decision record lives only in decision comments. Nobody rewrites them, and none of them is deliverable text.
 

@@ -22,6 +22,10 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 
 ## Field notes
 
+**Event marker.** The first line of every event comment: `<!-- ghim:event type=<type> at=<YYYY-MM-DDTHH:MM+HH:MM> -->`, with the type in lower case (`result`, `decision`, `failure`, `checkpoint`, `correction`) and the same local date and time as the heading, followed by its UTC offset (`date '+%Y-%m-%dT%H:%M%:z'`). The linter rejects a comment whose marker is missing or disagrees with its heading.
+
+**Figures and tables.** In a body, a figure is a `### Figure: <id> - <title>` block inside its section: a caption with every number's denominator, then the image embedded from the commit or tag it was committed in. Its row under "Sources" starts with `Figure <id>` and gives `data` and `command` in backticks: ``| Figure read-time | data `bench/out/summary.tsv`; command `python bench/plot.py bench/out/summary.tsv`; commit 4f2a9c1 |``. A table block is the same with `### Table:` and a Markdown table or a link to a committed file. `compile.py` lists both, with their sources.
+
 **Timestamps.** Always date, time and zone in the tracker's convention: `2026-03-04 14:10 PST`. Get it with `date '+%Y-%m-%d %H:%M %Z'`. The header of every event comment, and the heading and "Last updated" line of a resume comment, must carry one.
 
 **Numbers.** Value, denominator, source path, every time: "41 of 53 files (`tests/conformance/report-4f2a9c1.txt`)". Open the source file and read the number from it while drafting. A percentage alone is not a number.

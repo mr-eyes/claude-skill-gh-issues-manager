@@ -36,6 +36,9 @@ python3 scripts/lint_drafts.py --kind result --repo owner/name --online draft.md
 | Resume comment: heading with timestamp, markers, all six fields, block length; resume markers inside a hub body | error |
 | Final record: title line, at least one section, every section filled, "Sources" last | error |
 | Final record: an "As of" line with a date, month or year, a date and time in the text, a `<details>` block, a heading for decisions, open work, provenance, next steps or the other sections of the older record form (current state, not established, code and evidence, related topics, history, status), a dated heading outside "Sources" | error |
+| Event comment: the marker line `<!-- ghim:event type=<type> at=<ISO time> -->` first, with the type of the comment and the same local time as the heading | error |
+| Final record: a figure block without a caption, an embedded image or a Sources row; a table block without a caption, a table or a link, or a Sources row | error |
+| Final record: a figure or table linked from a branch such as `main` instead of a commit or tag | warning |
 | Final record: a line that looks like a section heading but is not one (`### Results`, `##Results`, indented, underlined, inside a code block) | error |
 | Final record: a `## ` heading that is not a section heading of the project's profiles, or that two profiles share and the labels do not settle | error |
 | Final record: section labels that disagree with the headings (`--labels`, or the labels in a manifest) | error |

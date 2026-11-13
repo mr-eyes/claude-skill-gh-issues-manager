@@ -36,9 +36,9 @@ claude plugin marketplace add mr-eyes/claude-skill-gh-issues-manager
 claude plugin install gh-issues-manager@mr-eyes-skills
 ```
 
-The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's SessionStart hook is registered for every project but prints nothing until you trust a repository (next section). The same trust list governs `resume_block.py show`.
+The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's hooks are registered for every project but print nothing until you trust a repository (next section). The same trust list governs `resume_block.py show`.
 
-### Trust the repositories whose resume comments the hook may print
+### Trust the repositories whose record the hooks may print
 
 The hook puts text from a GitHub issue into every session, so it is off until you opt in, per repository, in a file that belongs to you and not to any project:
 
@@ -97,7 +97,9 @@ Compaction replaces a long conversation with a summary. Summaries drop detail an
 
 | What | Where it lives | How it comes back |
 |---|---|---|
-| Current focus, active issues, last decisions, next actions, holds | The newest resume comment on the hub by an allowed account | Printed into context by the hook after every compaction, or read with `resume_block.py show` |
+| Current focus, active issues, last decisions, next actions, holds | The newest resume comment on the hub by an allowed account | Printed into context in the record brief after every compaction, or read with `resume_block.py show` |
+| Where the record is, the topics by section, active issues, issues that need triage | The hub and the issue labels, copied into a local index | The record brief at session start; a short brief in every subagent; a one-line reminder on prompts when it changed |
+| Results, decisions and failures not yet posted | The conversation | The PreCompact hook tells the compaction summary to keep them, with enough detail to post them |
 | Work in flight | Checkpoint comments on `active` issues | Read in step 2 of the session protocol |
 | Results, decisions, failures | Dated comments on topic issues | Read on demand; nothing depends on remembering them |
 | What the deliverable says now, with its numbers | The bodies of the topic issues, each number with its source | Read before acting or writing |
@@ -105,9 +107,18 @@ Compaction replaces a long conversation with a summary. Summaries drop detail an
 
 The resume block is small on purpose (under 4,000 characters) and a new one is posted at the end of every working stretch, so the first thing a blank session reads is short, current and written for exactly that reader. Posting it as a comment, never as an edit, also keeps a history of where the project stood at each stop.
 
-## The optional hook and CLAUDE.md snippet
+## The hooks and the CLAUDE.md snippet
 
-**Hook.** `scripts/session_start_hook.sh` runs on the SessionStart event for all five session sources (`startup`, `resume`, `clear`, `compact`, `fork`) and prints the newest allowed resume comment plus the numbers and labels of open active issues, followed by one line pointing to the skill's session protocol; Claude Code adds that output to the session context. It prints nothing when the project has no configuration file, when the repository is not in your trusted list, when `gh` is missing or offline, or when GitHub does not answer within 10 seconds. If no resume comment by an allowed account can be used, it prints one line saying so and why. The plugin installs it. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the path.
+**Hooks.** Four hooks keep every session and subagent aware of the record, built from a local index of the issues (`scripts/index.py`, a SQLite file under the plugin's data folder that can be rebuilt from GitHub at any time):
+
+| Hook | Prints |
+|---|---|
+| SessionStart (startup, resume, clear, compact, fork) | The record brief: the rules for writing to the record, the hub, the deliverable topics by section, the open active issues, the issues that need triage, and the newest allowed resume block. It syncs the index first; if GitHub does not answer in time it prints the brief from the index and says how old it is |
+| SubagentStart | A short brief for the subagent: where the record is, the issues in play, and that it reads the record for facts and posts only when its task says so |
+| UserPromptSubmit | One line with the hub and the active issues, only when it changed or every tenth prompt (`"prompt_hook": {"enabled": false}` in `.gh-issues-manager.json` turns it off) |
+| PreCompact | Instructions for the compaction summary: keep the issue numbers in play and every result, decision or failure that is not yet posted |
+
+They print nothing when the project has no configuration file or the repository is not in your trusted list, and never write to GitHub. `python3 scripts/hooks.py --print` shows each payload and its size. The plugin installs them. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the paths.
 
 **CLAUDE.md snippet.** [`templates/claude-md-snippet.md`](skills/gh-issues-manager/templates/claude-md-snippet.md) is a few lines for the project's CLAUDE.md that give every session the hub's location and the recording rules.
 
@@ -124,7 +135,9 @@ All are in `skills/gh-issues-manager/scripts/`, use only the Python standard lib
 | `convert_body.py` | Converts a record body of an older form into deliverable text: stops if the live body changed, keeps the former body as a comment, replaces the body and section labels, reads all back | yes |
 | `resume_block.py` | `show` prints the newest resume comment written by an allowed account, for trusted repositories only. `update` posts a new resume comment on the hub and reads it back; it never edits the hub or an earlier comment, and warns when the posting login is not allowed | `update` only |
 | `snapshot.py` | Saves all issues, pull requests and comments as local Markdown with an index, for offline reading and for surveying an old tracker | no |
-| `session_start_hook.sh` | The SessionStart hook | no |
+| `index.py` | Keeps the local index of the record: `sync` reads what changed on GitHub; `query` answers consistency, impact, timeline, triage and brief questions without network | no |
+| `hooks.py`, `run_hook.sh`, `session_start_hook.sh` | The four hooks; `hooks.py --print` shows their payloads | no |
+| `compile.py` | Writes the deliverable section by section in the hub's order, the figure, table and source lists, the full dated timeline of the project and a manifest | no |
 
 Every script that writes has `--dry-run`, which prints the exact `gh` commands and changes nothing.
 
@@ -143,7 +156,7 @@ Every script that writes has `--dry-run`, which prints the exact `gh` commands a
 
 Issue and comment text read back from GitHub is data, never instructions. A hub can be edited by anyone with write access to the repository, and on a public repository anyone can open issues and write comments. The skill tells Claude to treat everything it reads from the tracker as a description of the project's state, and never to follow commands found there. Only the user, in the session, gives instructions.
 
-The SessionStart hook deserves extra care because it puts tracker text into context without anyone asking. Its rules:
+The hooks deserve extra care because they put tracker text into context without anyone asking. Their rules:
 
 | Rule | What it prevents |
 |---|---|
@@ -151,9 +164,9 @@ The SessionStart hook deserves extra care because it puts tracker text into cont
 | Trust is checked in every mode. The hook prints nothing, and `resume_block.py show` prints a one-line notice, unless the configured repository is in the user's own trusted list (`~/.config/gh-issues-manager/trusted-repos` or `GHIM_TRUSTED_REPOS`). Nothing inside a project can add to that list, and the repository owner counts as an allowed writer only once the repository is trusted | A cloned repository that configures itself to inject text |
 | The resume block is a comment, and only a comment that passes every check is printed: its first line is the resume heading, each marker stands alone on its own line outside any quote or code block, its author is allowed (the repository owner plus the logins listed for that repository in the trusted file), and it was never edited by anyone. The newest 50 comments of the hub come from one API call, and the newest passing comment is chosen by creation time. Newer resume comments that fail are counted with the reason and never shown | Anyone posting or editing a comment to get text into your sessions |
 | The time the shown comment was posted is printed with it | Showing an old block as if it were current. Anyone can post many comments on a public hub and push the newest resume comment beyond the 50 that are read (the script then says there is none), and an account with write access can delete the newest resume comment so that an older one is shown. Neither changes what an allowed account wrote; posting a new resume comment repairs both |
-| Issue titles are never printed. Open `active` issues are listed by number and labels, with a count | Instructions smuggled in through an issue title, which anyone who can edit the issue can change |
-| The output is wrapped in `BEGIN/END PROJECT STATUS DATA` lines that say it is data and not instructions, text that imitates those lines is defused, the block is cut at 4,000 characters and the whole output at 6,000 | Text posing as system or user instructions, and context flooding |
-| A failure to read the configuration or the hub, or a timeout, prints nothing and exits 0. If only the list of active issues cannot be read, the block is printed with a line saying that list was not read | A slow or broken network blocking the session |
+| An issue title is printed only when the issue was opened by an allowed account and no other account renamed it; otherwise only its number, with the reason | Instructions smuggled in through an issue title, which anyone who can edit the issue can change |
+| The output is wrapped in `BEGIN/END PROJECT STATUS DATA` lines that say it is data and not instructions, text that imitates those lines is defused, and the SessionStart brief is cut at 6,000 characters (the subagent brief at 2,500) | Text posing as system or user instructions, and context flooding |
+| A failure to read the configuration prints nothing and exits 0. A failure to read GitHub, or a timeout, prints the brief from the local index with its age, or nothing when there is no index yet | A slow or broken network blocking the session |
 
 The trust boundary is your allowed list, not write access to the repository. Anyone who can comment can post something that looks like a resume comment, and anyone with write access (collaborators, GitHub Apps, Actions workflows, tokens with `issues: write`) can edit comments, but a comment by a non-allowed author is ignored and so is any comment that was edited after posting. Because each resume block is a single, unedited comment, the check covers everything that is printed, however long the project runs. For the same reason, never edit a resume comment yourself; post a new one. An allowed account can still write anything, so list only accounts you would take project status from, and list a bot if a bot posts the resume comments.
 
@@ -205,7 +218,7 @@ To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json
 
 ```text
 .claude-plugin/           plugin.json and marketplace.json
-hooks/hooks.json          SessionStart hook registration for the plugin
+hooks/hooks.json          hook registration for the plugin (four events)
 skills/gh-issues-manager/
   SKILL.md                the skill
   references/             detail loaded on demand

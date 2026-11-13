@@ -10,6 +10,8 @@ The record is organized so that writing the paper, release notes or report is as
 
 ## Assembling
 
+`python3 scripts/compile.py --out <folder>` does the mechanical part: one file per deliverable section in the hub's order, holding each topic's text for that section with its issue link; lists of figures, tables and sources; and the full timeline of the project with a manifest (see [hooks-and-index.md](hooks-and-index.md)). Run `index.py query consistency` first and resolve what it reports. The steps below say what the assembly reads, whether by hand or by the script.
+
 For each section, in the order of the hub's deliverable table, take from every listed issue the text under that section's `## ` heading, and nothing else. The "Sources" sections give the file, table, commit or tag behind each number; use them to build figure and table inputs, the data and code availability statement, and the reference list of resources, not as text.
 
 When the deliverable needs something no body says, that is a finding about the record. Record it properly first (a result comment, then the body), or open an `active` issue for it, instead of filling the gap from memory or from a comment.
