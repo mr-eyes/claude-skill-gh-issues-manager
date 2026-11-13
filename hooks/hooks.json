@@ -1,5 +1,5 @@
 {
-  "description": "Print the newest allowed resume comment of the project hub into context whenever a session starts, resumes, is cleared, compacted or forked. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository.",
+  "description": "Inject the project's record brief from GitHub issues: at session start, resume, clear, compaction and fork; into every subagent; as one line on user prompts when it changed; and as instructions for the compaction summary. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,6 +9,41 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/session_start_hook.sh",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh subagent-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh prompt-submit",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh pre-compact",
+            "timeout": 10
           }
         ]
       }

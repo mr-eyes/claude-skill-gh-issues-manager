@@ -11,6 +11,41 @@
           }
         ]
       }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/skills/gh-issues-manager/scripts/run_hook.sh\" subagent-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/skills/gh-issues-manager/scripts/run_hook.sh\" prompt-submit",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/skills/gh-issues-manager/scripts/run_hook.sh\" pre-compact",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
