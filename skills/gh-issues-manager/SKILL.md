@@ -60,7 +60,7 @@ Full model: [references/issue-model.md](references/issue-model.md). Label sets, 
 2. `python3 ${CLAUDE_SKILL_DIR}/scripts/setup_labels.py --dry-run`, then without `--dry-run`.
 3. Draft the hub, the first resume comment ([templates/resume-block.md](templates/resume-block.md), kind `resume`, on `NEW-hub`) and one final record per topic from the templates into a drafts folder, with `NEW-<key>` wherever an issue number is needed, and list them in a manifest ([templates/manifest.example.json](templates/manifest.example.json)).
 4. `python3 ${CLAUDE_SKILL_DIR}/scripts/create_issues.py --manifest <file> --dry-run`, review, then run it for real. It creates the issues, replaces the placeholders, pins the hub and reads every body back.
-5. Put the hub number into `.gh-issues-manager.json`, and offer the CLAUDE.md snippet and the SessionStart hook.
+5. Put the hub number into `.gh-issues-manager.json`, build the local index once with `python3 ${CLAUDE_SKILL_DIR}/scripts/index.py sync`, and offer the CLAUDE.md snippet and the hooks.
 
 Step-by-step with commands: [references/bootstrap.md](references/bootstrap.md).
 

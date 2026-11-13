@@ -59,7 +59,7 @@ An issue whose draft contains placeholders is created with a one-line stub body 
 
 ## 6. Finish
 
-1. Put the hub number into `.gh-issues-manager.json` as `hub`.
+1. Put the hub number into `.gh-issues-manager.json` as `hub`, then build the local index once in the foreground: `python3 scripts/index.py sync`. Without it the first session builds the index in the background and shows the brief from its next prompt on (see [hooks-and-index.md](hooks-and-index.md)).
 2. Run `python3 scripts/resume_block.py show --active` to confirm the first resume comment reads back. This needs the repository in the user's trusted list; if it is not, the command says so and the user decides.
 3. Post the frame agreed in step 1 as a decision comment on the hub, with the owner's exact words.
 4. Offer the CLAUDE.md snippet and the SessionStart hook (see [session-protocol.md](session-protocol.md)). The hook prints nothing until the user adds the repository to their own trusted list; give them the line to add.
