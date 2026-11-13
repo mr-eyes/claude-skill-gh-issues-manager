@@ -39,10 +39,14 @@ Examples:
 import argparse
 import datetime
 import json
+import math
 import os
 import re
+import signal
+import socket
 import sqlite3
 import sys
+import tempfile
 import time
 import urllib.parse
 
@@ -280,11 +284,17 @@ def store_comment_page(db, rows, changed):
 
 
 def since_query(db, key):
-    """The "since" for an API query: the newest stamp seen, less OVERLAP seconds; None for a full read."""
+    """The "since" for an API query: the newest stamp seen, less OVERLAP seconds; None for a full read.
+
+    A sync that goes on from an unfinished one starts at the newest stamp itself, without the overlap, so that a
+    short sync cannot read the same overlapping pages again and again without getting further.
+    """
     newest = since_value(db, key)
     if not newest:
         return None
-    value = datetime.datetime.strptime(newest, "%Y-%m-%dT%H:%M:%SZ") - datetime.timedelta(seconds=OVERLAP)
+    resuming = get_meta(db, "sync_complete") == "0" or not get_meta(db, "synced_at")
+    value = datetime.datetime.strptime(newest, "%Y-%m-%dT%H:%M:%SZ") - datetime.timedelta(
+        seconds=0 if resuming else OVERLAP)
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -317,7 +327,7 @@ def newest_of(current, stamp):
 def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=None, log=print, lock_held=False):
     """Bring the index up to date under the per-repository lock; see run_sync. Raises SyncBusy when it is held."""
     storage.folder(storage.cache_top(), storage.repo_folder(repo))
-    if not lock_held and not take_lock(repo, int(deadline) + 60 if deadline else 6 * 3600):
+    if not lock_held and not take_lock(repo, int(deadline) + 60 if deadline else LOCK_MAX):
         raise SyncBusy("another sync of this repository is running; try again when it has finished")
     try:
         return run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap)
@@ -352,7 +362,7 @@ def run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap):
     full = rebuild or not get_meta(db, "synced_at") or get_meta(db, "derive_pending") == "1"
     set_meta(db, "derive_pending", "1")  # cleared next to synced_at, once everything stored has been derived
     db.commit()
-    summary = {"issues": 0, "comments": 0, "timelines": 0, "edits": 0, "complete": True}
+    summary = {"issues": 0, "comments": 0, "timelines": 0, "edits": 0, "complete": True, "pages": 0}
     changed_issues, changed_comments = set(), set()
     rebuilt = False
     try:
@@ -383,6 +393,7 @@ def run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap):
             changed_issues = set()
         newest = since_value(db, "issues_newest")
         for page in ([] if rebuild else pages(call, query, since)):
+            summary["pages"] += 1
             store_issue_page(db, page, changed_issues)
             for row in page:
                 newest = newest_of(newest, row.get("updated_at"))
@@ -469,6 +480,15 @@ def run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap):
         if rebuild and not rebuilt:
             raise  # a rebuild that cannot finish its listings changes nothing
         summary["complete"] = False  # keep and derive what was read; the next sync goes on from there
+    except BaseException:
+        # Another failure: derive what was stored so the brief shows it now; derive_pending stays 1, so the next
+        # sync derives everything again.
+        if changed_issues or changed_comments:
+            try:
+                derive(db, None if full else changed_issues, None if full else changed_comments)
+            except Exception:  # noqa: BLE001 - the original failure is the one to report
+                pass
+        raise
     derive(db, None if full else changed_issues, None if full else changed_comments)
     set_meta(db, "hub", str(hub or ""))
     set_meta(db, "derive_pending", "0")
@@ -508,20 +528,51 @@ def alive(pid):
     return True
 
 
-def running(repo):
-    """{"pid", "started", "budget"} of a background sync that is running for `repo`, or None."""
+HOST = re.sub(r"[^A-Za-z0-9._-]", "-", socket.gethostname())[:100] or "unknown"
+LOCK_MAX = 6 * 3600
+
+
+def lock_record(pid, budget):
+    return {"pid": pid, "host": HOST, "started": time.time(), "budget": budget}
+
+
+def valid_lock(data):
+    """The lock's fields when they have the expected form and range, else None. Its text is never printed."""
+    if not isinstance(data, dict) or set(data) != {"pid", "host", "started", "budget"}:
+        return None
+    pid, host, started, budget = data["pid"], data["host"], data["started"], data["budget"]
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1:
+        return None
+    if not isinstance(host, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", host):
+        return None
+    for value in (started, budget):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            return None
+    if not 0 <= started <= time.time() + 5 or not 1 <= budget <= LOCK_MAX:
+        return None
+    return data
+
+
+def live_lock(data):
+    """True when a valid lock names a sync that may still be running: within its time window and, on this host,
+    a process that exists. On another host (a shared home) only the time window counts."""
+    if valid_lock(data) is None or time.time() - data["started"] > data["budget"] + 60:
+        return False
+    return data["host"] != HOST or alive(data["pid"])
+
+
+def read_lock(path):
     try:
-        text = storage.read_file(background_files(repo)["lock"])
-        data = json.loads(text) if text else None
+        text = storage.read_file(path)
+        return json.loads(text) if text else None
     except (storage.StorageError, ValueError, OSError):
         return None
-    if not isinstance(data, dict) or set(data) != {"pid", "started", "budget"} or \
-            not all(isinstance(data[k], (int, float)) and not isinstance(data[k], bool) for k in data) or \
-            not isinstance(data["pid"], int) or data["pid"] < 1:
-        return None
-    if time.time() - data["started"] > data["budget"] + 60 or not alive(int(data["pid"])):
-        return None  # stale: past its budget, or the process is gone
-    return data
+
+
+def running(repo):
+    """{"pid", "host", "started", "budget"} of a sync that holds the lock of `repo`, or None."""
+    data = read_lock(background_files(repo)["lock"])
+    return data if live_lock(data) else None
 
 
 def log_line(repo, text):
@@ -540,46 +591,130 @@ def log_line(repo, text):
 
 def release_lock(repo):
     path = background_files(repo)["lock"]
-    try:
-        text = storage.read_file(path)
-        if text and json.loads(text).get("pid") == os.getpid():
+    data = read_lock(path)
+    if valid_lock(data) and data["pid"] == os.getpid() and data["host"] == HOST:
+        try:
             os.unlink(path)
-    except (storage.StorageError, ValueError, OSError, AttributeError):
-        pass
+        except FileNotFoundError:
+            pass
+
+
+def _link_new(path, record):
+    """Put a complete lock file at `path` in one step; False when a lock is already there."""
+    folder = os.path.dirname(path)
+    descriptor, temporary = tempfile.mkstemp(dir=folder, prefix=".lock-")
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(record, handle)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def _judge(path):
+    """((device, inode), fields) of the lock file at `path`, read through one descriptor; None when there is none."""
+    if not storage.check_path(path, "file"):
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return None
+    try:
+        info = os.fstat(descriptor)
+        text = os.read(descriptor, 4096)
+    finally:
+        os.close(descriptor)
+    try:
+        data = json.loads(text.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        data = None
+    return (info.st_dev, info.st_ino), data
+
+
+def _identity(path):
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def _holds(path):
+    """True when the lock at `path` names this process on this host. A lock moved aside for a moment by a process
+    checking for staleness is put back at once, so a missing file is read again a few times."""
+    for _ in range(25):
+        if not os.path.lexists(path):
+            time.sleep(0.02)
+            continue
+        data = read_lock(path)
+        return bool(valid_lock(data) and data["pid"] == os.getpid() and data["host"] == HOST)
+    return False
 
 
 def take_lock(repo, budget):
+    """Take the sync lock of `repo`; True only when this process holds it afterwards.
+
+    The lock appears whole in one step (a temporary file linked into place). A
+    stale lock is renamed away only if it is still the very file that was judged
+    stale (same device and inode), so of several processes only one removes it;
+    a fresh lock moved by mistake is put back. Errors of the file system are
+    reported as storage.StorageError of kind "lock".
+    """
     path = background_files(repo)["lock"]
-    for _ in range(2):
-        try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        except FileExistsError:
-            if running(repo):
+    budget = int(min(LOCK_MAX, max(1, budget)))
+    try:
+        for _ in range(40):
+            if _link_new(path, lock_record(os.getpid(), budget)):
+                return _holds(path)
+            judged = _judge(path)
+            if judged is None:
+                continue
+            identity, data = judged
+            if live_lock(data):
                 return False
-            storage.check_path(path, "file")
-            os.unlink(path)  # a stale lock of a sync that ended or ran out of time
-            continue
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump({"pid": os.getpid(), "started": time.time(), "budget": budget}, handle)
-        return True
-    return False
+            if _identity(path) != identity:
+                continue  # replaced since it was judged; judge again
+            moved = "%s.stale-%d" % (path, os.getpid())
+            try:
+                os.rename(path, moved)  # only one process can move a given file away
+            except FileNotFoundError:
+                continue
+            if _identity(moved) != identity:
+                # it was replaced by a fresh lock just before the rename: put that one back
+                try:
+                    os.link(moved, path)
+                except FileExistsError:
+                    pass
+                os.unlink(moved)
+                continue
+            os.unlink(moved)
+        return False
+    except storage.StorageError:
+        raise
+    except OSError as error:
+        raise storage.StorageError("the sync lock at %s could not be taken: %s" % (path, error), "lock")
 
 
 def hand_lock(repo, pid, budget):
     """Rewrite a lock this process holds so that it names `pid`, the background sync it started."""
-    storage.write_file(background_files(repo)["lock"], json.dumps({"pid": pid, "started": time.time(),
-                                                                   "budget": budget}))
+    storage.write_file(background_files(repo)["lock"], json.dumps(lock_record(pid, int(min(LOCK_MAX, max(1, budget))))))
 
 
 def wait_for_lock(repo, wait=10.0):
     """For a sync started by a hook: True once the hook has written this process's pid into the lock."""
     end = time.time() + wait
     while time.time() < end:
-        try:
-            data = json.loads(storage.read_file(background_files(repo)["lock"]) or "null")
-        except (storage.StorageError, ValueError, OSError):
-            data = None
-        if isinstance(data, dict) and data.get("pid") == os.getpid():
+        data = read_lock(background_files(repo)["lock"])
+        if valid_lock(data) and data["pid"] == os.getpid() and data["host"] == HOST:
             return True
         time.sleep(0.1)
     return False
@@ -591,6 +726,13 @@ def background_sync(repo, hub, budget, lock_held=False):
     With lock_held the hook that started this process took the lock and hands it over by writing this pid into it.
     """
     storage.folder(storage.cache_top(), storage.repo_folder(repo))
+    if hasattr(signal, "alarm"):  # a hard stop, so the process cannot outlive the window in which its lock is live
+
+        def stop(signum, frame):
+            raise TimeoutError("background sync passed its budget")
+
+        signal.signal(signal.SIGALRM, stop)
+        signal.alarm(int(budget) + 45)
     if not (wait_for_lock(repo) if lock_held else take_lock(repo, budget)):
         log_line(repo, "not started: another background sync is running")
         return 0
@@ -918,7 +1060,9 @@ def main(argv=None):
     p = sub.add_parser("sync", help="update the index from GitHub (read-only on GitHub)")
     p.add_argument("--rebuild", action="store_true", help="drop everything in the index and read it all again")
     p.add_argument("--timeout", type=int, default=120, help="seconds allowed per gh call")
-    p.add_argument("--deadline", type=int, help="seconds for the whole sync; it stops there and keeps what it has")
+    p.add_argument("--deadline", type=int, default=3600,
+                   help="seconds for the whole sync (default 3600, at most 21600); it stops there, keeps what it has, "
+                        "and the next sync goes on from there")
     p.add_argument("--background", action="store_true",
                    help="run as the background sync the hooks start: under a lock, logging to sync.log in the private "
                         "folder, for at most background_sync_seconds (default 300)")
@@ -938,10 +1082,12 @@ def main(argv=None):
     repo = ghim.resolve_repo(args.repo, config)
     hub = config.get("hub") if config.get("repo", "").lower() == repo.lower() else None
     if args.command == "sync" and args.background:
-        return background_sync(repo, hub, args.deadline or background_budget(config), lock_held=args.lock_held)
+        return background_sync(repo, hub, min(args.deadline, background_budget(config)) if args.lock_held
+                               else background_budget(config), lock_held=args.lock_held)
     if args.command == "sync":
         print(ghim.describe(config, repo))
-        summary = sync(repo, hub, rebuild=args.rebuild, timeout=args.timeout, deadline=args.deadline)
+        summary = sync(repo, hub, rebuild=args.rebuild, timeout=args.timeout,
+                       deadline=min(LOCK_MAX - 60, max(1, args.deadline)))
         print("synced %s into %s: %d issues, %d comments, %d timelines, %d body edits read%s"
               % (repo, index_path(repo), summary["issues"], summary["comments"], summary["timelines"], summary["edits"],
                  "" if summary["complete"] else "; stopped at the deadline, run sync again to finish"))
