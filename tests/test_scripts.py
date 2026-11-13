@@ -2502,6 +2502,41 @@ class BackgroundTests(RecordSandbox):
         self.assertIn("**Current focus:** Release 0.3.0", session)
         self.assertEqual(["failure"], [e["type"] for e in self.query("timeline", "--issue", "6", "--type", "failure")])
 
+    def test_an_interrupted_resume_read_keeps_the_cached_block(self):
+        import gc
+        import warnings
+        import index as index_module
+        self.ready()
+        self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")
+        self.in_process()
+        real_pick, real_extract, picked = ghim.pick_resume_comment, ghim.extract_resume_block, []
+
+        class Interrupted(BaseException):
+            pass
+
+        def pick(*args, **kw):
+            out = real_pick(*args, **kw)
+            picked.append(1)
+            return out
+
+        def extract(body):
+            if picked:
+                raise Interrupted()  # an alarm or an interrupt while the new values are worked out
+            return real_extract(body)
+
+        ghim.pick_resume_comment, ghim.extract_resume_block = pick, extract
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", ResourceWarning)  # the interrupted sync leaves its connection to gc
+                with self.assertRaises(Interrupted):
+                    index_module.sync(REPO, 4, log=lambda *a: None)
+                gc.collect()
+        finally:
+            ghim.pick_resume_comment, ghim.extract_resume_block = real_pick, real_extract
+        self.assertEqual([1], picked)
+        self.assertIn("**Current focus:** Release 0.3.0", self.hook("session-start", gh="false").stdout)
+        self.assertEqual(["failure"], [e["type"] for e in self.query("timeline", "--issue", "6", "--type", "failure")])
+
     def test_a_slow_resume_read_at_session_start_is_a_partial_refresh(self):
         self.ready()
         self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")

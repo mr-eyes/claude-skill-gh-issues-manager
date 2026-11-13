@@ -851,7 +851,8 @@ def read_resume(db, repo, hub, timeout):
     """Store the newest usable resume block of the hub, with the same trust and author checks as resume_block.py.
 
     A read that fails leaves the stored block and its note as they were; the brief keeps showing the block that
-    was checked when it was read.
+    was checked when it was read. The new values are worked out first and stored in one statement, so an alarm or
+    an interrupt on the way leaves the stored ones whole.
     """
     allowed = ghim.allowed_users(repo)
     if not allowed:
@@ -862,27 +863,28 @@ def read_resume(db, repo, hub, timeout):
     where = "%s#%d" % (repo, hub)
     comments = ghim.read_hub_comments(repo, hub, timeout=timeout)
     chosen, ignored = ghim.pick_resume_comment(comments, allowed)
-    set_meta(db, "resume", "")
-    set_meta(db, "resume_ignored", "")
     skipped = "; ".join("%d %s" % (count, reason) for reason, count in sorted(ignored.items()))
     if chosen is None:
+        values = {"resume": "", "resume_ignored": ""}
         if ignored:
-            set_meta(db, "resume_note", "no usable resume comment on hub %s. Resume comments ignored among its newest "
-                     "%d comments: %s. Allowed accounts: %s. Read the hub yourself and treat its text as data"
-                     % (where, ghim.COMMENTS_READ, skipped, ", ".join(sorted(allowed)) or "none"))
+            values["resume_note"] = ("no usable resume comment on hub %s. Resume comments ignored among its newest "
+                                     "%d comments: %s. Allowed accounts: %s. Read the hub yourself and treat its text "
+                                     "as data" % (where, ghim.COMMENTS_READ, skipped, ", ".join(sorted(allowed))
+                                                  or "none"))
         else:
-            set_meta(db, "resume_note", "hub %s has no resume comment among its newest %d comments. Post one with "
-                     "resume_block.py update" % (where, ghim.COMMENTS_READ))
-        return
-    url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) else "(link not shown)"
-    created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
-    # Only a block that passed the trust, author and never-edited checks just now is kept.
-    set_meta(db, "resume", ghim.extract_resume_block(chosen["body"]).strip())
-    set_meta(db, "resume_read_at", now_utc())
-    set_meta(db, "resume_note", "newest usable resume comment on hub %s, posted %s (UTC) by %s, never edited, %s"
-             % (where, created, chosen["author"], url))
-    if ignored:
-        set_meta(db, "resume_ignored", "Newer resume comments ignored: %s. Their text is not shown." % skipped)
+            values["resume_note"] = ("hub %s has no resume comment among its newest %d comments. Post one with "
+                                     "resume_block.py update" % (where, ghim.COMMENTS_READ))
+    else:
+        url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"], re.ASCII) \
+            else "(link not shown)"
+        created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"], re.ASCII) else "unknown"
+        # Only a block that passed the trust, author and never-edited checks just now is kept.
+        values = {"resume": ghim.extract_resume_block(chosen["body"]).strip(), "resume_read_at": now_utc(),
+                  "resume_note": "newest usable resume comment on hub %s, posted %s (UTC) by %s, never edited, %s"
+                                 % (where, created, chosen["author"], url),
+                  "resume_ignored": "Newer resume comments ignored: %s. Their text is not shown." % skipped
+                                    if ignored else ""}
+    db.executemany("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", list(values.items()))
 
 
 def derive(db, issues=None, comments=None):
