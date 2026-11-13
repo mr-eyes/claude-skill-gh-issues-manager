@@ -1141,7 +1141,7 @@ class ResumeBlockTests(Sandbox):
             full_env.pop(variable, None)
         full_env.update(XDG_CACHE_HOME=os.path.join(self.dir, "xdg-cache"), XDG_STATE_HOME=os.path.join(self.dir, "xdg-state"),
                         XDG_CONFIG_HOME=os.path.join(self.dir, "xdg-config"))
-        full_env.update(GHIM_HOOK_TIMEOUT="40", GHIM_HOOK_CALL_TIMEOUT="15")  # slow disks must not fail the tests
+        full_env.update(GHIM_HOOK_TIMEOUT="15")  # the most run_hook.sh allows: slow disks must not fail the tests
         full_env.update(self.env)
         full_env.update(env or {})
         cwd = cwd or self.project
@@ -1442,7 +1442,7 @@ class ResumeBlockTests(Sandbox):
 
     def test_hook_gives_up_quickly_when_gh_is_slow(self):
         start = time.time()
-        result = self.run_hook(env={"FAKE_GH_SLEEP": "6", "GHIM_HOOK_TIMEOUT": "2", "GHIM_HOOK_CALL_TIMEOUT": "4"})
+        result = self.run_hook(env={"FAKE_GH_SLEEP": "6", "GHIM_HOOK_TIMEOUT": "2"})
         self.assertLess(time.time() - start, 5.5)
         self.assertEqual(0, result.returncode)
         self.assertIn("cached, not refreshed", result.stdout)
