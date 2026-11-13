@@ -1,3 +1,4 @@
+<!-- ghim:event type=decision at=2026-03-04T15:55-08:00 -->
 ### Decision: 2026-03-04 15:55 PST - strict quoting is the default
 
 **Decision:** Strict quoting is the default mode of the reader.

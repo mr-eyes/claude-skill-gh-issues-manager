@@ -10,6 +10,12 @@ Read speed was measured on three files of 1 MB, 10 MB and 100 MB. Each file was 
 
 tinycsv read the 100 MB file in a median of 1.84 s over 5 runs, against 1.21 s for the standard library. tinycsv was slower on 3 of 3 files.
 
+### Figure: read-time - Median read time by file size
+
+Median wall time of 5 reads per file for tinycsv and the standard library, on files of 1 MB, 10 MB and 100 MB.
+
+![Median read time of tinycsv and the standard library by file size](https://github.com/example-org/tinycsv/blob/4f2a9c1/bench/out/run-0304/read-time.png?raw=true)
+
 ## Limitations
 
 The measurements come from one machine and one Python version. Memory use was not measured. The reader measured does not support newlines inside quoted fields, so files that contain them are not represented.
@@ -21,3 +27,4 @@ The measurements come from one machine and one Python version. Memory use was no
 | Medians of 1.84 s and 1.21 s over 5 runs; slower on 3 of 3 files | `bench/out/run-0304/summary.tsv`, commit 4f2a9c1 |
 | Benchmark files | bench data v1 under `bench/data/` |
 | Timing method | `bench/run.py`, commit 4f2a9c1 |
+| Figure read-time | data `bench/out/run-0304/summary.tsv`; command `python bench/plot.py bench/out/run-0304/summary.tsv`; commit 4f2a9c1 |

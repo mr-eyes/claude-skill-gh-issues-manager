@@ -161,7 +161,7 @@ class LintTests(unittest.TestCase):
         emptied = re.sub(r"(## Limitations\n).*?(\n## Sources)", r"\1\2", text, flags=re.S)
         self.assertEqual(["section-empty"], codes(self.lint(emptied, **ok)))
         no_sources_text = re.sub(r"(## Sources\n).*", r"\1", text, flags=re.S)
-        self.assertEqual(["section-empty"], codes(self.lint(no_sources_text, **ok)))
+        self.assertEqual(["block-source", "section-empty"], codes(self.lint(no_sources_text, **ok)))
         a, b = text.index("## Limitations"), text.index("## Sources")
         self.assertIn("sources-last", codes(self.lint(text[:a] + text[b:] + "\n" + text[a:b], **ok)))
         self.assertIn("title-line", codes(self.lint(text.split("\n", 1)[1], **ok)))
@@ -259,6 +259,40 @@ class LintTests(unittest.TestCase):
         self.assertIn("timestamp", codes(self.lint(text.replace("14:10 PST", "14:10"), kind="result")))
         self.assertIn("timestamp", codes(self.lint(text.replace("2026-03-04 14:10 PST", "March 4"), kind="result")))
         self.assertIn("header", codes(self.lint(text.replace("### Result:", "### Update:"), kind="result")))
+
+    def test_event_comments_carry_a_marker_that_agrees_with_the_heading(self):
+        text = ghim.read_text(os.path.join(EXAMPLE, "result-speed-1.md"))
+        self.assertTrue(text.startswith("<!-- ghim:event type=result at=2026-03-04T14:10-08:00 -->\n### Result:"))
+        self.assertEqual([], codes(self.lint(text, kind="result")))
+        marker = text.split("\n", 1)[0]
+        cases = {
+            "missing": text.split("\n", 1)[1],
+            "wrong type": text.replace("type=result", "type=decision", 1),
+            "other time": text.replace("T14:10-08:00", "T14:11-08:00", 1),
+            "no offset": text.replace("T14:10-08:00", "T14:10", 1),
+            "after the heading": text.split("\n", 1)[1].replace("\n", "\n" + marker + "\n", 1),
+        }
+        for name, changed in cases.items():
+            self.assertIn("event-marker", codes(self.lint(changed, kind="result")), name)
+        self.assertEqual([], codes(self.lint(text.replace("T14:10-08:00", "T14:10:00Z", 1)
+                                             .replace("14:10 PST", "14:10 UTC", 1), kind="result")))
+        self.assertEqual([], codes(self.lint("Just a note without a marker.\n", kind="generic")))
+
+    def test_figure_and_table_blocks(self):
+        speed = ghim.read_text(os.path.join(EXAMPLE, "topic-speed.md"))
+        reader = ghim.read_text(os.path.join(EXAMPLE, "topic-reader.md"))
+        ok = dict(kind="final-record", config=EXAMPLE_CONFIG)
+        self.assertEqual([], [str(f) for f in self.lint(speed, **ok) + self.lint(reader, **ok)])
+        image = [l for l in speed.split("\n") if l.startswith("![")][0]
+        caption = [l for l in speed.split("\n") if l.startswith("Median wall time of 5 reads")][0]
+        row = [l for l in speed.split("\n") if l.startswith("| Figure read-time |")][0]
+        self.assertIn("figure-image", codes(self.lint(speed.replace(image, ""), **ok)))
+        self.assertIn("figure-image", codes(self.lint(speed.replace("?raw=true", ""), **ok)))
+        self.assertIn("block-caption", codes(self.lint(speed.replace(caption, ""), **ok)))
+        self.assertIn("block-source", codes(self.lint(speed.replace(row + "\n", ""), **ok)))
+        self.assertIn("block-ref", codes(self.lint(speed.replace("/blob/4f2a9c1/", "/blob/main/"), **ok), "warning"))
+        no_table = re.sub(r"\| Kind of file.*?\| All files \| 41 \| 53 \|\n", "", reader, flags=re.S)
+        self.assertIn("table-content", codes(self.lint(no_table, **ok)))
 
     def test_secrets_restricted_and_banned(self):
         token = "ghp_" + "a1B2" * 9
@@ -790,7 +824,7 @@ class ConvertBodyTests(Sandbox):
 
     def record_comments(self):
         return [c for c in self.repo()["comments"].values()
-                if c["issue"] == 10 and c["body"].startswith(ghim.RECORD_HEADING)]
+                if c["issue"] == 10 and ghim.RECORD_HEADING in c["body"][:200]]
 
     def test_dry_run_writes_nothing(self):
         result = self.convert("--dry-run")
@@ -811,6 +845,8 @@ class ConvertBodyTests(Sandbox):
         records = self.record_comments()
         self.assertEqual(1, len(records))
         record = records[0]["body"].replace("\r\n", "\n")
+        self.assertRegex(record.split("\n")[0], r"^<!-- ghim:event type=record at=\d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d\d:\d\d -->$")
+        record = record.split("\n", 1)[1]
         self.assertTrue(record.startswith(ghim.RECORD_HEADING + "\n\n" + self.NOTE + "\n\n---\n\n## Current state"))
         self.assertEqual(ghim.normalize(self.before), ghim.normalize(record.split("\n---\n\n", 1)[1]))
         issue = self.repo()["issues"]["10"]

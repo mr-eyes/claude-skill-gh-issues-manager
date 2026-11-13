@@ -34,6 +34,7 @@ Examples:
 """
 
 import argparse
+import datetime
 import difflib
 import json
 import os
@@ -48,15 +49,20 @@ RULE = "\n---\n\n"
 MENTION = re.compile(r"(?<![\w`/@.])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\b")
 
 
-def record_comment(note, former):
-    """The comment that keeps a former body: heading, the note, a rule, the body unchanged."""
+def record_comment(note, former, at=None):
+    """The comment that keeps a former body: event marker, heading, the note, a rule, the body unchanged."""
     body = former.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
-    return "%s\n\n%s\n%s%s\n" % (ghim.RECORD_HEADING, note.strip(), RULE, body)  # a blank line before the rule
+    at = at or datetime.datetime.now().astimezone().isoformat(timespec="minutes")
+    marker = "<!-- ghim:event type=record at=%s -->" % at
+    return "%s\n%s\n\n%s\n%s%s\n" % (marker, ghim.RECORD_HEADING, note.strip(), RULE, body)  # a blank line before the rule
 
 
 def split_record(text):
-    """(note, former body) of a record comment, or None when the text is not one."""
+    """(note, former body) of a record comment, with or without its event marker, or None when the text is not one."""
     text = ghim.normalize(text)
+    first, _, rest = text.partition("\n")
+    if first.startswith("<!-- ghim:event"):
+        text = rest
     if not text.startswith(ghim.RECORD_HEADING + "\n") or RULE not in text:
         return None
     head, former = text.split(RULE, 1)

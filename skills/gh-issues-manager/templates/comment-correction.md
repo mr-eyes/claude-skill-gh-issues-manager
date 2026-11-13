@@ -1,3 +1,4 @@
+<!-- ghim:event type=correction at={{YYYY-MM-DDTHH:MM+HH:MM}} -->
 ### Correction: {{YYYY-MM-DD HH:MM ZONE}} - {{short title}}
 
 **Corrects:** {{link to the comment or section that was wrong}}

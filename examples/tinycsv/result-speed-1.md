@@ -1,3 +1,4 @@
+<!-- ghim:event type=result at=2026-03-04T14:10-08:00 -->
 ### Result: 2026-03-04 14:10 PST - first speed benchmark
 
 **What ran:** `python bench/run.py --repeat 5` at commit 4f2a9c1, output in `bench/out/run-0304/`.

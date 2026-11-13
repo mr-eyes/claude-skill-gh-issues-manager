@@ -27,6 +27,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
+import record_format  # noqa: E402
 
 # A final record holds the deliverable's sections, named by the profile, then Sources.
 FINAL_RECORD_SECTIONS = ["## " + ghim.SOURCES_HEADING]
@@ -265,7 +266,10 @@ def check_sections(text, kind, template, add):
     rows = [(n, l) for n, l, region in split_regions(text) if region == "prose"]
     header = spec.get("header")
     if header:
-        first = next(((n, l) for n, l in rows if l.strip()), (0, ""))
+        nonblank = [(n, l) for n, l in rows if l.strip()]
+        first = nonblank[0] if nonblank else (0, "")
+        if record_format.parse_marker(first[1]) or first[1].lstrip().startswith("<!-- ghim:event"):
+            first = nonblank[1] if len(nonblank) > 1 else (0, "")
         expected = r"^### %s: " % header
         if not re.match(expected, first[1]):
             add("error", "header", first[0], "first line must start with '### %s: <date time zone> - <title>'" % header)
@@ -403,6 +407,51 @@ def check_final_record(text, template, labels, profiles, add):
                 "the section" % (label, headings[label]))
 
 
+def check_event_marker(text, kind, template, add):
+    """An event comment starts with `<!-- ghim:event type=<kind> at=<ISO time> -->`, then its heading; both agree."""
+    first, second = record_format.first_lines(text)
+    marker = record_format.parse_marker(first)
+    if marker is None:
+        add("error", "event-marker", 1, "an event comment starts with the line "
+            "'<!-- ghim:event type=%s at=<YYYY-MM-DDTHH:MM+HH:MM> -->', then its heading" % kind)
+        return
+    if marker.get("type") != kind:
+        add("error", "event-marker", 1, "the marker says type=%s, but this is a %s comment" % (marker.get("type"), kind))
+    at = marker.get("at", "")
+    if template and "{{" in at:
+        return
+    if not re.fullmatch(record_format.ISO, at):
+        add("error", "event-marker", 1, "at=%s is not an ISO 8601 time with its offset, for example "
+            "at=2026-03-04T14:10-08:00" % (at or "(missing)"))
+        return
+    stamp = re.search(STAMP, second)
+    if stamp and stamp.group(0)[:16] != at[:16].replace("T", " "):
+        add("error", "event-marker", 1, "the marker time %s and the heading time %s disagree; write the same local "
+            "date and time in both" % (at, stamp.group(0)))
+
+
+def check_blocks(text, template, add):
+    """Each figure block has a caption, an image at a ref and a Sources row; each table block a caption, a table
+    or a linked file, and a Sources row."""
+    for block in record_format.blocks(text):
+        name = "%s %s" % (block["kind"].capitalize(), block["id"])
+        if not block["caption"]:
+            add("error", "block-caption", block["line"], "%s has no caption" % name)
+        if block["kind"] == "figure" and not block["image"].startswith("https://") or \
+                block["kind"] == "figure" and "?raw=true" not in block["image"]:
+            add("error", "figure-image", block["line"], "%s embeds no image; write "
+                "![text](https://github.com/<owner>/<repo>/blob/<commit or tag>/<path>?raw=true)" % name)
+        if block["kind"] == "table" and not block["has_table"] and not block["image"]:
+            add("error", "table-content", block["line"], "%s holds neither a Markdown table nor a link to a committed "
+                "file" % name)
+        if block["ref"] and block["ref"].lower() in record_format.BRANCH_REFS:
+            add("warning", "block-ref", block["line"], "%s points at the branch '%s'; use a commit or tag so the "
+                "file cannot change under the text" % (name, block["ref"]))
+        if block["source"] is None:
+            add("error", "block-source", block["line"], "%s has no row in Sources; add '| %s | data `<file>`; "
+                "command `<command>` |'" % (name, name))
+
+
 def lint_text(text, kind="generic", template=False, allow_placeholders=False,
               known_keys=None, known_numbers=None, number_checker=None, config=None,
               labels=None, profiles=None):
@@ -502,6 +551,10 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
 
     if kind == "final-record":
         check_final_record(text, template, labels, profiles, add)
+        check_blocks(text, template, add)
+
+    if KINDS[kind].get("header") and kind != "resume":
+        check_event_marker(text, kind, template, add)
 
     if kind != "resume" and (ghim.RESUME_START in text or ghim.RESUME_END in text):
         add("error", "resume-markers-misplaced", 0,

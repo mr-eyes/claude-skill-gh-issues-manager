@@ -1,3 +1,4 @@
+<!-- ghim:event type=decision at={{YYYY-MM-DDTHH:MM+HH:MM}} -->
 ### Decision: {{YYYY-MM-DD HH:MM ZONE}} - {{short title}}
 
 **Decision:** {{what was decided, in one sentence}}

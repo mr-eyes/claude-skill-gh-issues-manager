@@ -1,3 +1,4 @@
+<!-- ghim:event type=failure at={{YYYY-MM-DDTHH:MM+HH:MM}} -->
 ### Failure: {{YYYY-MM-DD HH:MM ZONE}} - {{short title}}
 
 **What failed:** {{the observed failure, with the error text or symptom}}

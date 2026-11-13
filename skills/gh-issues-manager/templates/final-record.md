@@ -10,10 +10,26 @@ This body is the {{deliverable, for example "manuscript"}} text for the sections
 
 {{The text for this section, written the same way.}}
 
+### Figure: {{short-id}} - {{title}}
+
+{{Caption: what the figure shows, with every number's denominator.}}
+
+![{{alt text}}](https://github.com/{{owner}}/{{repo}}/blob/{{commit or tag}}/{{path to the image}}?raw=true)
+
+### Table: {{short-id}} - {{title}}
+
+{{Caption: what the table shows.}}
+
+| {{column}} | {{column}} |
+|---|---|
+| {{value}} | {{value}} |
+
 ## Sources
 
 | Statement or number | Source |
 |---|---|
 | {{the number or claim as it appears above}} | {{file, table, commit or tag; a resource release such as a reference build may be named here}} |
+| Figure {{short-id}} | data `{{data file}}`; command `{{exact command or script that makes the image}}`; {{commit or tag}} |
+| Table {{short-id}} | data `{{data file}}`; command `{{exact command or script that makes the table}}`; {{commit or tag}} |
 
-<!-- One "## " section per deliverable section this topic feeds, in the deliverable's order, with the headings the profile defines (references/profiles.md); delete the sections it does not feed. The issue carries exactly the section labels of these headings. In a project whose profiles define no section labels, use plain "## " headings for the parts of the text; the body still holds the current text only and no history. Commits and tags appear only under Sources. -->
+<!-- One "## " section per deliverable section this topic feeds, in the deliverable's order, with the headings the profile defines (references/profiles.md); delete the sections it does not feed. The issue carries exactly the section labels of these headings. In a project whose profiles define no section labels, use plain "## " headings for the parts of the text; the body still holds the current text only and no history. Commits and tags appear only under Sources, and in the image link of a figure, which points at the commit or tag the image was committed in. Delete the figure and table blocks the topic does not need. -->

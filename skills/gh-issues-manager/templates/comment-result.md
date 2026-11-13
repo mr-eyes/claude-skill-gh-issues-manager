@@ -1,3 +1,4 @@
+<!-- ghim:event type=result at={{YYYY-MM-DDTHH:MM+HH:MM}} -->
 ### Result: {{YYYY-MM-DD HH:MM ZONE}} - {{short title}}
 
 **What ran:** {{what was done; job ids, commit, command or workflow}}

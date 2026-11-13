@@ -1,3 +1,4 @@
+<!-- ghim:event type=checkpoint at={{YYYY-MM-DDTHH:MM+HH:MM}} -->
 ### Checkpoint: {{YYYY-MM-DD HH:MM ZONE}} - {{short title}}
 
 **State:** {{where the work stands, in two or three sentences}}
