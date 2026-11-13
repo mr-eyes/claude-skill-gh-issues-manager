@@ -5,10 +5,9 @@ GitHub stays the record. The index is a copy that the hooks, compile.py and the
 consistency checks read without asking GitHub again. It can be deleted or
 rebuilt with `sync --rebuild` whenever its content is in doubt.
 
-Where it lives: <CLAUDE_PLUGIN_DATA>/private/<owner>__<repo>/index.sqlite, or,
-when Claude Code has not set CLAUDE_PLUGIN_DATA, $XDG_CACHE_HOME/gh-issues-manager/
-private/<owner>__<repo>/index.sqlite (by default under ~/.cache). Never in the
-project tree. An index that is a symlink, is writable by others, belongs to another
+Where it lives: $XDG_CACHE_HOME/gh-issues-manager/private/<owner>__<repo>/
+index.sqlite (by default under ~/.cache), the same path for hooks and for
+scripts run in a terminal. Never in the project tree. An index that is a symlink, is writable by others, belongs to another
 user or repository, or was not created by this plugin for this user is not
 read (see storage.py).
 

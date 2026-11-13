@@ -165,10 +165,11 @@ def uncovered_signals(root, config):
 
 
 # The kinds of deliverable the hooks have already mentioned, or that existed when the setup ran, kept in the
-# private storage of the repository's index. Only kind names from SIGNALS are kept.
+# repository's private state folder, which hooks and terminal scripts resolve alike. Only kind names from SIGNALS
+# are kept.
 
 def told_path(repo):
-    return os.path.join(storage.folder(storage.cache_top(), storage.repo_folder(repo)), "signals.json")
+    return os.path.join(storage.folder(storage.state_top(), storage.repo_folder(repo)), "signals.json")
 
 
 def read_told(path):

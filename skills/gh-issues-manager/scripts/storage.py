@@ -1,18 +1,24 @@
 """Where the plugin keeps its local files, and the checks that keep a planted file from being read.
 
 The index and the hook state never live in the project tree, which a cloned
-repository controls. They live under a top folder: the plugin's data folder
-(CLAUDE_PLUGIN_DATA, set by Claude Code), else $XDG_CACHE_HOME/gh-issues-manager
-(index) and $XDG_STATE_HOME/gh-issues-manager (state and key), by default under
-~/.cache and ~/.local/state.
+repository controls. They live under two top folders, the same for every entry
+point (hooks, the session's terminal, the user's shell):
+$XDG_CACHE_HOME/gh-issues-manager for the index and
+$XDG_STATE_HOME/gh-issues-manager for the state and the key, by default under
+~/.cache and ~/.local/state. CLAUDE_PLUGIN_DATA is not used: Claude Code sets it
+for hooks but not for the session's Bash tool, so it would split the storage
+between the two. An index left in an older plugin data folder is ignored; the
+first sync builds a new one.
+
+GHIM_DATA_HOME is for tests only: when it is an absolute path, the index and the
+state go there (the key stays under XDG_STATE_HOME).
 
 Inside the top folder the plugin keeps everything in a private folder it creates
 and controls, `private/`, with mode 0700:
 
-- top folder: a real folder (not a symlink), owned by the user or by root. Claude
-  Code creates CLAUDE_PLUGIN_DATA with the user's umask, so on a system with
-  umask 0002 it is group-writable; when the user owns it, the plugin tightens it
-  to 0700 and goes on. A top folder owned by another user, or by root and
+- top folder: a real folder (not a symlink), owned by the user or by root. A top
+  folder the user owns that was created with a loose umask (group-writable with
+  umask 0002) is tightened to 0700, and the plugin goes on. A top folder owned by another user, or by root and
   writable by others, is refused.
 - private/ and everything below it: real folders and files owned by the user,
   with no permissions for group or others (folders 0700, files 0600), checked at
@@ -52,18 +58,22 @@ def _env_dir(name, default):
     return value if value and os.path.isabs(value) else default
 
 
+def test_home():
+    """GHIM_DATA_HOME, for tests only: one folder for the index and the state. None when unset."""
+    value = os.environ.get("GHIM_DATA_HOME")
+    return value if value and os.path.isabs(value) else None
+
+
 def cache_top():
-    data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if data and os.path.isabs(data):
-        return data
-    return os.path.join(_env_dir("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache")), "gh-issues-manager")
+    """The top folder of the index: $XDG_CACHE_HOME/gh-issues-manager, the same for hooks and the terminal."""
+    return test_home() or os.path.join(_env_dir("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache")),
+                                       "gh-issues-manager")
 
 
 def state_top(for_key=False):
-    """The top folder for state. The key always lives under XDG_STATE_HOME, never in CLAUDE_PLUGIN_DATA."""
-    data = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if data and os.path.isabs(data) and not for_key:
-        return data
+    """The top folder of the state: $XDG_STATE_HOME/gh-issues-manager. The key always lives there."""
+    if not for_key and test_home():
+        return test_home()
     return os.path.join(_env_dir("XDG_STATE_HOME", os.path.join(os.path.expanduser("~"), ".local", "state")),
                         "gh-issues-manager")
 

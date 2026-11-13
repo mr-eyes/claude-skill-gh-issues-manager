@@ -454,7 +454,10 @@ def doctor():
         problems.append("the repository is not trusted, so the hooks stay silent")
     gh = os.environ.get("GHIM_GH") or shutil.which("gh")
     print("gh: %s" % (gh.split()[0] if gh else "not found on PATH"))
-    print("CLAUDE_PLUGIN_DATA: %s" % (os.environ.get("CLAUDE_PLUGIN_DATA") or "not set (XDG folders are used)"))
+    print("storage: index under %s, state and key under %s; hooks and terminal scripts resolve the same folders "
+          "(CLAUDE_PLUGIN_DATA is not used)%s" % (storage.cache_top(), storage.state_top(for_key=True),
+                                                 "; GHIM_DATA_HOME is set (for tests only): index and state under %s"
+                                                 % storage.test_home() if storage.test_home() else ""))
     name = storage.repo_folder(repo)
     rows = [("index top folder", storage.cache_top(), "top"),
             ("index private folder", os.path.join(storage.cache_top(), storage.PRIVATE), "private"),
