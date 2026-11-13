@@ -1665,6 +1665,8 @@ class HookTests(RecordSandbox):
         self.write_config(dict(self.config, prompt_hook={"every": 2}))
         self.assertEqual([True, False, True], [bool(self.hook("prompt-submit", session="s1").stdout) for _ in range(3)])
         self.write_config(dict(self.config, prompt_hook={"enabled": False}))
+        self.assertEqual("", self.hook("prompt-submit", session="s1").stdout)  # the reminder is off
+        self.assertIn("===== BEGIN PROJECT STATUS DATA", self.hook("prompt-submit", session="s3").stdout)  # brief once
         self.assertEqual("", self.hook("prompt-submit", session="s3").stdout)
 
     def test_titles_are_shown_only_for_allowed_authors_never_renamed_by_others(self):
@@ -2167,6 +2169,12 @@ class BackgroundTests(RecordSandbox):
         self.wait_background()
         self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
 
+    def test_the_next_prompt_restarts_a_build_that_stopped(self):
+        self.assertEqual("", self.hook("prompt-submit", session="s9").stdout)  # no index and no build: starts one
+        self.wait_background()
+        self.assertIn("starting background sync from a hook", self.log())
+        self.assertIn("===== BEGIN PROJECT STATUS DATA", self.hook("prompt-submit", session="s9").stdout)
+
     def test_partial_progress_survives_a_failed_sync(self):
         paged = {"GHIM_SYNC_PAGE": "2"}
         failed = self.tool("index.py", "sync", env=dict(paged, FAKE_GH_FAIL_ON_PAGE="3"))
@@ -2236,8 +2244,9 @@ class RecoveryTests(RecordSandbox):
     def test_one_writer_at_a_time(self):
         self.ready()
         lock = os.path.join(self.folder(), "sync.lock")
-        with open(lock, "w") as handle:
-            json.dump({"pid": os.getpid(), "started": time.time(), "budget": 300}, handle)  # held by a live process
+        import index as index_module
+        with open(lock, "w") as handle:  # held by a live process on this host
+            json.dump({"pid": os.getpid(), "host": index_module.HOST, "started": time.time(), "budget": 300}, handle)
         os.chmod(lock, 0o600)
         busy = self.tool("index.py", "sync")
         self.assertNotEqual(0, busy.returncode)
@@ -2252,6 +2261,107 @@ class RecoveryTests(RecordSandbox):
             result = self.tool("index.py", "sync")
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertNotIn("1; rm", result.stdout + result.stderr)
+
+    def test_only_one_process_takes_the_lock(self):
+        import multiprocessing
+        import index as index_module
+        environment = {"CLAUDE_PLUGIN_DATA": self.data, "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
+                       "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache")}
+        saved = {k: os.environ.get(k) for k in environment}
+        os.environ.update(environment)
+        try:
+            folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
+            lock = os.path.join(folder, "sync.lock")
+
+            def worker(at, queue):
+                while time.time() < at:
+                    pass
+                try:
+                    queue.put(bool(index_module.take_lock(REPO, 300)))
+                except Exception as error:  # noqa: BLE001 - counted below
+                    queue.put("raised %s" % type(error).__name__)
+                time.sleep(1.0)  # stay alive, as a sync would
+
+            for mode in ("no lock", "stale lock"):
+                for round_number in range(20):
+                    if mode == "stale lock":
+                        with open(lock, "w") as handle:
+                            json.dump({"pid": 4194000, "host": index_module.HOST, "started": time.time(),
+                                       "budget": 300}, handle)
+                        os.chmod(lock, 0o600)
+                    queue = multiprocessing.Queue()
+                    at = time.time() + 0.3
+                    workers = [multiprocessing.Process(target=worker, args=(at, queue)) for _ in range(6)]
+                    for process in workers:
+                        process.start()
+                    results = [queue.get(timeout=60) for _ in workers]
+                    for process in workers:
+                        process.join()
+                    self.assertEqual(1, results.count(True), (mode, round_number, results))
+                    self.assertEqual([], [r for r in results if not isinstance(r, bool)], (mode, round_number))
+                    os.rename(lock, "%s.round-%s-%d" % (lock, mode[:5].strip(), round_number))
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+    def test_lock_fields_and_hosts(self):
+        import index as index_module
+        now = time.time()
+        good = {"pid": 4194000, "host": index_module.HOST, "started": now, "budget": 300}
+        self.assertEqual(good, index_module.valid_lock(dict(good)))
+        for bad in (dict(good, started=now + 3600), dict(good, started=-1), dict(good, budget=0),
+                    dict(good, budget=7 * 3600), dict(good, budget=float("nan")), dict(good, pid=True),
+                    dict(good, host="a b"), dict(good, extra=1)):
+            self.assertIsNone(index_module.valid_lock(bad), bad)
+        self.assertFalse(index_module.live_lock(good))  # this host, and no such process
+        self.assertTrue(index_module.live_lock(dict(good, host="another-host")))  # another host: the window counts
+        self.assertFalse(index_module.live_lock(dict(good, host="another-host", started=now - 400)))
+        self.ready()
+        lock = os.path.join(self.folder(), "sync.lock")
+        with open(lock, "w") as handle:
+            json.dump(dict(good, host="another-host"), handle)
+        os.chmod(lock, 0o600)
+        self.assertIn("another sync of this repository is running", self.tool("index.py", "sync").stderr)
+
+    def test_a_failure_still_derives_what_was_stored(self):
+        self.ready()
+        self.add_comment(9901, 5, ghim.read_text(os.path.join(EXAMPLE, "decision-reader-1.md")).replace(
+            "15:55", "17:20"), "2026-04-06T10:00:00Z")
+        self.assertNotEqual(0, self.tool("index.py", "sync", env={"FAKE_GH_FAIL_ON": "api graphql"}).returncode)
+        self.assertEqual(2, len(self.query("timeline", "--issue", "5", "--type", "decision")))  # without another sync
+
+    def test_a_sync_after_an_unfinished_one_starts_at_the_newest_stamp(self):
+        self.ready()
+        import sqlite3
+        db = sqlite3.connect(os.path.join(self.folder(), "index.sqlite"))
+        newest = db.execute("SELECT value FROM meta WHERE key = 'issues_newest'").fetchone()[0]
+        db.execute("UPDATE meta SET value = '0' WHERE key = 'sync_complete'")
+        db.commit()
+        db.close()
+        before = len(self.repo()["log"])
+        self.tool("index.py", "sync")
+        listing = [" ".join(c) for c in self.repo()["log"][before:] if "issues?state=all" in " ".join(c)][0]
+        self.assertIn("since=" + newest, listing)  # no overlap while going on from an unfinished sync
+        before = len(self.repo()["log"])
+        self.tool("index.py", "sync")
+        listing = [" ".join(c) for c in self.repo()["log"][before:] if "issues?state=all" in " ".join(c)][0]
+        self.assertNotIn("since=" + newest, listing)  # an ordinary incremental sync keeps the minute of overlap
+
+    def test_more_than_fits_in_a_session_start_says_partly_refreshed(self):
+        self.ready()
+        data = self.repo()
+        for number in range(20, 34):
+            data["issues"][str(number)] = {"title": "Task %d" % number, "body": "x", "labels": ["active"],
+                                           "created_at": "2026-04-06T10:00:00Z", "updated_at": "2026-04-06T10:00:00Z"}
+        self.save(data)
+        session = self.hook("session-start").stdout
+        self.assertIn("(partly refreshed: more to read than fits in a session start, continuing in the background",
+                      session)
+        self.assertIn("Open active issues: 16", session)  # the listing that was read is in the brief already
+        self.wait_background()
 
     def test_two_refusals_keep_one_refused_file(self):
         self.ready()
