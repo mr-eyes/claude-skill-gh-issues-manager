@@ -85,6 +85,7 @@ def api_comment(state, repo, cid):
     return {
         "id": int(cid), "body": comment["body"], "user": {"login": comment.get("user", ME)},
         "created_at": comment.get("created_at", "2026-01-07T09:15:00Z"),
+        "updated_at": comment.get("updated_at", comment.get("created_at", "2026-01-07T09:15:00Z")),
         "issue_url": "https://api.github.com/repos/%s/issues/%d" % (repo, comment["issue"]),
         "html_url": "https://github.com/%s/issues/%d#issuecomment-%s" % (repo, comment["issue"], cid),
     }
@@ -120,8 +121,11 @@ def main():
     elif words == "issue create":
         number = state["next_issue"]
         state["next_issue"] += 1
+        state["clock"] = state.get("clock", 0) + 1
+        stamp = "2026-04-02T%02d:%02d:00Z" % divmod(state["clock"], 60)
         state["issues"][str(number)] = {"title": option(args, "--title"), "body": body_from(args),
-                                        "labels": option(args, "--label", many=True)}
+                                        "labels": option(args, "--label", many=True),
+                                        "created_at": stamp, "updated_at": stamp}
         print("https://github.com/%s/issues/%d" % (repo, number))
     elif words == "issue edit":
         if args[2] not in state["issues"]:
@@ -139,6 +143,12 @@ def main():
                 fail("could not add label: '%s' not found" % label)
         if "--body-file" in args:
             issue["body"] = body_from(args)
+            state["clock"] = state.get("clock", 0) + 1
+            stamp = "2026-04-02T%02d:%02d:00Z" % divmod(state["clock"], 60)
+            if not issue.get("edits"):
+                issue["edits"] = [{"at": issue.get("created_at", "2026-01-05T17:00:00Z"), "by": issue.get("user", ME)}]
+            issue["edits"].insert(0, {"at": stamp, "by": ME})
+            issue["last_edited_at"] = issue["updated_at"] = stamp
         for label in option(args, "--add-label", many=True):
             if label not in issue.setdefault("labels", []):
                 issue["labels"].append(label)
@@ -152,6 +162,7 @@ def main():
         state["next_comment"] += 1
         state["comments"][str(cid)] = {"issue": int(args[2]), "body": body_from(args),
                                        "created_at": "2026-04-01T%02d:%02d:00Z" % divmod(cid - 9100, 60)}
+        state["issues"][args[2]]["updated_at"] = state["comments"][str(cid)]["created_at"]
         print("https://github.com/%s/issues/%s#issuecomment-%d" % (repo, args[2], cid))
     elif words == "issue pin":
         state["issues"][args[2]]["pinned"] = True
@@ -175,6 +186,20 @@ def main():
         if problems:  # the real API rejects the whole query
             print(json.dumps({"errors": [{"message": m} for m in problems]}))
             fail("gh: " + problems[0])
+        if "number" not in fields:  # issues named in the query by aliases, for their body edits
+            out = {}
+            for alias, name, arguments, children in graphql_check.parse_query(fields["query"])[0][3]:
+                issue = state["issues"].get(arguments.get("number"))
+                if issue is None:
+                    out[alias] = None
+                    continue
+                edits = issue.get("edits", [])
+                out[alias] = {"lastEditedAt": issue.get("last_edited_at"),
+                              "userContentEdits": {"totalCount": len(edits), "nodes": [
+                                  {"editedAt": e["at"], "editor": {"login": e["by"]}} for e in edits]}}
+            print(json.dumps({"data": {"repository": out}}))
+            save(state)
+            return
         issue = state["issues"].get(fields["number"])
         if issue is None:
             print(json.dumps({"data": {"repository": {"issue": None}}}))
@@ -224,6 +249,12 @@ def main():
         jq = option(args, "--jq")
         match = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/comments/(\d+)", path)
         listing = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)/comments(\?.*)?", path)
+        timeline = re.fullmatch(r"repos/([^/]+/[^/]+)/issues/(\d+)/timeline(\?.*)?", path)
+        since = (re.search(r"[?&]since=([^&]+)", path) or [None, None])[1]
+        if timeline:
+            sys.stdout.write(json.dumps(state["issues"].get(timeline.group(2), {}).get("timeline", [])))
+            save(state)
+            return
         if listing:
             rows = [api_comment(state, listing.group(1), c) for c in sorted(state["comments"], key=int)
                     if state["comments"][c]["issue"] == int(listing.group(2))]
@@ -245,6 +276,7 @@ def main():
         elif re.fullmatch(r"repos/([^/]+/[^/]+)/issues/comments\?.*", path):
             api_repo = path.split("/issues")[0][6:]
             rows = [api_comment(state, api_repo, c) for c in sorted(state["comments"], key=int)]
+            rows = [r for r in rows if not since or r["updated_at"] >= since]
             # the real gh prints one JSON array per page, back to back
             sys.stdout.write(json.dumps(rows[:1]) + json.dumps(rows[1:]))
             save(state)
@@ -252,6 +284,7 @@ def main():
         elif re.fullmatch(r"repos/([^/]+/[^/]+)/issues\?.*", path):
             api_repo = path.split("/issues")[0][6:]
             rows = [api_issue(state, api_repo, n) for n in sorted(state["issues"], key=int)]
+            rows = [r for r in rows if not since or r["updated_at"] >= since]
             sys.stdout.write(json.dumps(rows[:2]) + json.dumps(rows[2:]))
             save(state)
             return

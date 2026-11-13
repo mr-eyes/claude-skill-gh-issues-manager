@@ -13,6 +13,8 @@ type Repository {
 
 type Issue {
   comments( after: String before: String first: Int last: Int orderBy: IssueCommentOrder ): IssueCommentConnection!
+  lastEditedAt: DateTime
+  userContentEdits( after: String before: String first: Int last: Int ): UserContentEditConnection
 }
 
 type IssueCommentConnection {

@@ -9,12 +9,12 @@ import re
 
 import ghim
 
-EVENT_TYPES = ("result", "decision", "failure", "checkpoint", "correction", "record")
+EVENT_TYPES = ("result", "decision", "failure", "checkpoint", "correction", "record", "triage")
 HEADED_TYPES = ("result", "decision", "failure", "checkpoint", "correction")
 ISO = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})"
 STAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:[A-Z]{2,5}|UTC[+-]\d{1,2}(?::\d{2})?)\b"
 MARKER = re.compile(r"^<!-- ghim:event ((?:[a-z]+=\S+ )*[a-z]+=\S+) -->\s*$")
-EVENT_HEADING = re.compile(r"^### (Result|Decision|Failure|Checkpoint|Correction)( \(reconstructed\))?: (%s) - (.+?)\s*$"
+EVENT_HEADING = re.compile(r"^### (Result|Decision|Failure|Checkpoint|Correction|Triage)( \(reconstructed\))?: (%s) - (.+?)\s*$"
                            % STAMP)
 BLOCK_HEADING = re.compile(r"^### (Figure|Table): ([A-Za-z0-9][\w.-]*) - (.+?)\s*$")
 IMAGE = re.compile(r"!\[[^\]]*\]\((https://github\.com/([\w.-]+/[\w.-]+)/blob/([^/\s]+)/([^\s?)]+)\?raw=true)\)")
