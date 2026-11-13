@@ -62,6 +62,8 @@ your-name/your-project
 your-lab/shared-project   your-name   a-colleague
 ```
 
+A name is read only in GitHub's form, in ASCII: an owner of 1 to 39 letters, digits, `-` or `_`, and a name of 1 to 100 letters, digits, `.`, `-` or `_`; a line in another form is ignored.
+
 For a repository owned by an organization, list the people who post the resume comments, because the owner is then not a person. `GHIM_TRUSTED_REPOS` (comma-separated `owner/name`) does the same for one shell. See "Security model" below for what this protects against.
 
 ### As a plain skill

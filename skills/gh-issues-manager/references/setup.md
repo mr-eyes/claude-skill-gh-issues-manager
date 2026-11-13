@@ -41,7 +41,7 @@ An answers file:
  "triage_workflow": true, "claude_md": true, "prompt_hook": {"enabled": true, "every": 10}, "trust": true}
 ```
 
-`setup.py` checks every value against a strict form (names, headings, numbers in range) and refuses the file otherwise. Each kind is listed once; a second deliverable of a kind is kind `other` with its own name. Section headings must be distinct (ignoring case), give distinct labels, and may not be "Sources", which is the sources table of every body. A deliverable of kind `other` keeps its name in the setup, and its labels start with that name (`sec:lab-handbook-safety`), so two such deliverables never share a label. When `apply` runs again on an existing setup, the values it keeps (time zone, topics, decision makers, profiles, hub) must fit the same forms; otherwise it stops and names them.
+`setup.py` checks every value against a strict form (names, headings, numbers in range) and refuses the file otherwise. `repo` takes GitHub's form in ASCII: an owner of 1 to 39 letters, digits, `-` or `_` that starts with a letter or digit, then a name of 1 to 100 letters, digits, `.`, `-` or `_` other than `.` and `..`. Each kind is listed once; a second deliverable of a kind is kind `other` with its own name. Section headings must be distinct (ignoring case), give distinct labels, and may not be "Sources", which is the sources table of every body. A deliverable of kind `other` keeps its name in the setup, and its labels start with that name (`sec:lab-handbook-safety`), so two such deliverables never share a label. When `apply` runs again on an existing setup, the values it keeps (time zone, topics, decision makers, profiles, hub) must fit the same forms; otherwise it stops and names them.
 
 ## What `apply` does
 
