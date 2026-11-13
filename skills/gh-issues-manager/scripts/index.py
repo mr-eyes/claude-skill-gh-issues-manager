@@ -55,6 +55,12 @@ FORMAT = "2"
 OVERLAP = 60  # seconds read again at each incremental sync, so items stamped in the same second are not missed
 ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 IDENTITY = ("repo", "format", "mark")
+BACKGROUND_DEFAULT = 300   # seconds a background sync may run
+BACKGROUND_RANGE = (30, 3600)
+
+
+class RefusedIndex(storage.StorageError):
+    """The index file is not this plugin's index of this repository for this user; a sync moves it aside."""
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -149,8 +155,8 @@ def connect(repo, create=True, tighten=True):
     if exists:
         problem = identity_problem(path, repo, create, tighten)
         if problem and not create:
-            raise storage.StorageError("%s is %s; it is not read. The next sync (a session start or index.py sync) "
-                                       "moves it aside and builds a new one" % (path, problem))
+            raise RefusedIndex("%s is %s; it is not read. The next sync (a session start or index.py sync) "
+                               "moves it aside and builds a new one" % (path, problem))
         if problem:
             moved = "%s.refused-%s" % (path, now_utc().replace(":", "").replace("-", ""))
             os.rename(path, moved)
@@ -234,6 +240,40 @@ def edits_query(repo, numbers):
     return 'query { repository(owner: "%s", name: "%s") { %s } }' % (owner, name, " ".join(parts))
 
 
+def store_issue_page(db, rows, changed):
+    for row in rows:
+        number = int(row["number"])
+        old = db.execute("SELECT updated_at FROM issues WHERE number = ?", (number,)).fetchone()
+        if old and old["updated_at"] == row.get("updated_at"):
+            continue  # read again because of the overlap; nothing changed
+        db.execute("""INSERT OR REPLACE INTO issues(number, title, state, is_pr, author, labels, body, created_at,
+                      updated_at, closed_at, url, last_edited_at, timeline_read, edits_read)
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?,
+                      (SELECT last_edited_at FROM issues WHERE number = ?), 0, 0)""",
+                   (number, row.get("title") or "", row.get("state") or "", 1 if row.get("pull_request") else 0,
+                    (row.get("user") or {}).get("login"), json.dumps([l.get("name") for l in row.get("labels") or []]),
+                    (row.get("body") or "").replace("\r\n", "\n"), row.get("created_at"), row.get("updated_at"),
+                    row.get("closed_at"), row.get("html_url"), number))
+        changed.add(number)
+
+
+def store_comment_page(db, rows, changed):
+    for row in rows:
+        match = re.search(r"/issues/(\d+)$", row.get("issue_url", ""))
+        if not match:
+            continue
+        updated = row.get("updated_at") or row.get("created_at")
+        old = db.execute("SELECT updated_at FROM comments WHERE id = ?", (int(row["id"]),)).fetchone()
+        if old and old["updated_at"] == updated:
+            continue
+        db.execute("INSERT OR REPLACE INTO comments(id, issue, author, body, created_at, updated_at, url) "
+                   "VALUES (?,?,?,?,?,?,?)",
+                   (int(row["id"]), int(match.group(1)), (row.get("user") or {}).get("login"),
+                    (row.get("body") or "").replace("\r\n", "\n"), row.get("created_at"), updated,
+                    row.get("html_url")))
+        changed.add(int(row["id"]))
+
+
 def since_query(db, key):
     """The "since" for an API query: the newest stamp seen, less OVERLAP seconds; None for a full read."""
     newest = since_value(db, key)
@@ -241,6 +281,26 @@ def since_query(db, key):
         return None
     value = datetime.datetime.strptime(newest, "%Y-%m-%dT%H:%M:%SZ") - datetime.timedelta(seconds=OVERLAP)
     return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def page_size():
+    try:
+        value = int(os.environ.get("GHIM_SYNC_PAGE", "100"))
+    except ValueError:
+        value = 100
+    return min(100, max(1, value))
+
+
+def pages(call, query, since):
+    """Rows of a listing, one page at a time, so each page can be stored before the next is read."""
+    size, page = page_size(), 1
+    while True:
+        url = "%s&per_page=%d&page=%d%s" % (query, size, page, "&since=" + since if since else "")
+        rows = ghim.parse_json_stream(call(["api", url]))
+        yield rows
+        if len(rows) < size:
+            return
+        page += 1
 
 
 def newest_of(current, stamp):
@@ -265,7 +325,9 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
         return ghim.gh(args, timeout=clock.left(timeout))
 
     db = connect(repo)
-    full = rebuild or not get_meta(db, "synced_at")
+    full = rebuild or not get_meta(db, "synced_at") or get_meta(db, "derive_pending") == "1"
+    set_meta(db, "derive_pending", "1")  # cleared once the derived tables are rebuilt for what this sync stores
+    db.commit()
     if rebuild:
         for table in RAW + DERIVED:
             db.execute("DELETE FROM %s" % table if table != "meta" else
@@ -274,53 +336,28 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
     summary = {"issues": 0, "comments": 0, "timelines": 0, "edits": 0, "complete": True}
 
     since = since_query(db, "issues_newest")
-    query = "repos/%s/issues?state=all&per_page=100&sort=updated&direction=asc" % repo
-    rows = ghim.parse_json_stream(call(["api", "--paginate", query + ("&since=" + since if since else "")]))
+    query = "repos/%s/issues?state=all&sort=updated&direction=asc" % repo
     changed_issues = set()
     newest = since_value(db, "issues_newest")
-    for row in rows:
-        number = int(row["number"])
-        newest = newest_of(newest, row.get("updated_at"))
-        old = db.execute("SELECT updated_at FROM issues WHERE number = ?", (number,)).fetchone()
-        if old and old["updated_at"] == row.get("updated_at"):
-            continue  # read again because of the overlap; nothing changed
-        db.execute("""INSERT OR REPLACE INTO issues(number, title, state, is_pr, author, labels, body, created_at,
-                      updated_at, closed_at, url, last_edited_at, timeline_read, edits_read)
-                      VALUES (?,?,?,?,?,?,?,?,?,?,?,
-                      (SELECT last_edited_at FROM issues WHERE number = ?), 0, 0)""",
-                   (number, row.get("title") or "", row.get("state") or "", 1 if row.get("pull_request") else 0,
-                    (row.get("user") or {}).get("login"), json.dumps([l.get("name") for l in row.get("labels") or []]),
-                    (row.get("body") or "").replace("\r\n", "\n"), row.get("created_at"), row.get("updated_at"),
-                    row.get("closed_at"), row.get("html_url"), number))
-        changed_issues.add(number)
+    for page in pages(call, query, since):
+        store_issue_page(db, page, changed_issues)
+        for row in page:
+            newest = newest_of(newest, row.get("updated_at"))
+        set_meta(db, "issues_newest", newest or "")  # progress: a sync that stops here resumes from this page
+        db.commit()
     summary["issues"] = len(changed_issues)
-    set_meta(db, "issues_newest", newest or "")
-    db.commit()
 
     since = since_query(db, "comments_newest")
-    query = "repos/%s/issues/comments?per_page=100&sort=updated&direction=asc" % repo
-    rows = ghim.parse_json_stream(call(["api", "--paginate", query + ("&since=" + since if since else "")]))
+    query = "repos/%s/issues/comments?sort=updated&direction=asc" % repo
     changed_comments = set()
     newest = since_value(db, "comments_newest")
-    for row in rows:
-        match = re.search(r"/issues/(\d+)$", row.get("issue_url", ""))
-        if not match:
-            continue
-        updated = row.get("updated_at") or row.get("created_at")
-        newest = newest_of(newest, updated)
-        old = db.execute("SELECT updated_at FROM comments WHERE id = ?", (int(row["id"]),)).fetchone()
-        if old and old["updated_at"] == updated:
-            continue
-        db.execute("INSERT OR REPLACE INTO comments(id, issue, author, body, created_at, updated_at, url) "
-                   "VALUES (?,?,?,?,?,?,?)",
-                   (int(row["id"]), int(match.group(1)), (row.get("user") or {}).get("login"),
-                    (row.get("body") or "").replace("\r\n", "\n"), row.get("created_at"), updated,
-                    row.get("html_url")))
-        changed_comments.add(int(row["id"]))
+    for page in pages(call, query, since):
+        store_comment_page(db, page, changed_comments)
+        for row in page:
+            newest = newest_of(newest, row.get("updated_at") or row.get("created_at"))
+        set_meta(db, "comments_newest", newest or "")
+        db.commit()
     summary["comments"] = len(changed_comments)
-    set_meta(db, "comments_newest", newest or "")
-    db.commit()
-
     # Timelines of issues and pull requests that changed, or whose timeline is still unread.
     pending = [r["number"] for r in db.execute("SELECT number FROM issues WHERE timeline_read = 0 ORDER BY number")]
     for count, number in enumerate(pending):
@@ -385,11 +422,156 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
     derive(db, None if full else changed_issues, None if full else changed_comments)
     set_meta(db, "hub", str(hub or ""))
     set_meta(db, "synced_at", now_utc())
+    set_meta(db, "derive_pending", "0")
     set_meta(db, "last_sync_error", "")
     set_meta(db, "sync_complete", "1" if summary["complete"] else "0")
     db.commit()
     db.close()
     return summary
+
+
+# ---------------------------------------------------------------- background sync
+
+def background_files(repo):
+    folder = index_dir(repo)
+    return {"lock": os.path.join(folder, "sync.lock"), "log": os.path.join(folder, "sync.log"),
+            "status": os.path.join(folder, "sync-status.json")}
+
+
+def background_budget(config):
+    value = config.get("background_sync_seconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return BACKGROUND_DEFAULT
+    return int(min(BACKGROUND_RANGE[1], max(BACKGROUND_RANGE[0], value)))
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def running(repo):
+    """{"pid", "started", "budget"} of a background sync that is running for `repo`, or None."""
+    try:
+        text = storage.read_file(background_files(repo)["lock"])
+        data = json.loads(text) if text else None
+    except (storage.StorageError, ValueError, OSError):
+        return None
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), (int, float)) for k in ("pid", "started", "budget")):
+        return None
+    if time.time() - data["started"] > data["budget"] + 60 or not alive(int(data["pid"])):
+        return None  # stale: past its budget, or the process is gone
+    return data
+
+
+def log_line(repo, text):
+    """Append one line to the background sync log in the private folder."""
+    path = background_files(repo)["log"]
+    if os.path.lexists(path):
+        storage.check_path(path, "file")
+        if os.path.getsize(path) > 200000:
+            tail = (storage.read_file(path) or "").split("\n")[-200:]
+            storage.write_file(path, "\n".join(tail))
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
+        handle.write("%s %s\n" % (now_utc(), re.sub(r"[\x00-\x1f\x7f]+", " ", text)[:500]))
+
+
+def take_lock(repo, budget):
+    path = background_files(repo)["lock"]
+    for _ in range(2):
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        except FileExistsError:
+            if running(repo):
+                return False
+            storage.check_path(path, "file")
+            os.unlink(path)  # a stale lock of a sync that ended or ran out of time
+            continue
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump({"pid": os.getpid(), "started": time.time(), "budget": budget}, handle)
+        return True
+    return False
+
+
+def hand_lock(repo, pid, budget):
+    """Rewrite a lock this process holds so that it names `pid`, the background sync it started."""
+    storage.write_file(background_files(repo)["lock"], json.dumps({"pid": pid, "started": time.time(),
+                                                                   "budget": budget}))
+
+
+def wait_for_lock(repo, wait=10.0):
+    """For a sync started by a hook: True once the hook has written this process's pid into the lock."""
+    end = time.time() + wait
+    while time.time() < end:
+        try:
+            data = json.loads(storage.read_file(background_files(repo)["lock"]) or "null")
+        except (storage.StorageError, ValueError, OSError):
+            data = None
+        if isinstance(data, dict) and data.get("pid") == os.getpid():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def background_sync(repo, hub, budget, lock_held=False):
+    """Run one sync under the per-repository lock, logging to sync.log and recording the outcome in sync-status.json.
+
+    With lock_held the hook that started this process took the lock and hands it over by writing this pid into it.
+    """
+    storage.folder(storage.cache_top(), storage.repo_folder(repo))
+    if not (wait_for_lock(repo) if lock_held else take_lock(repo, budget)):
+        log_line(repo, "not started: another background sync is running")
+        return 0
+    files = background_files(repo)
+    status = {"started": now_utc()}
+    try:
+        log_line(repo, "background sync started, pid %d, budget %d s" % (os.getpid(), budget))
+        summary = sync(repo, hub, timeout=min(120, budget), deadline=budget)
+        status.update(result="ok" if summary["complete"] else "stopped at its budget; the next sync continues",
+                      summary=summary)
+        log_line(repo, "background sync finished: %(issues)d issues, %(comments)d comments, %(timelines)d timelines, "
+                       "%(edits)d body edits%(more)s" % dict(summary, more="" if summary["complete"] else
+                                                               "; more remains"))
+        return 0
+    except Exception as error:  # noqa: BLE001 - recorded for --doctor; the next session tries again
+        status["result"] = "error: %s" % type(error).__name__
+        log_line(repo, "background sync error: %s: %s" % (type(error).__name__, str(error)[:300]))
+        return 1
+    finally:
+        status["finished"] = now_utc()
+        try:
+            storage.write_file(files["status"], json.dumps(status))
+        finally:
+            try:
+                text = storage.read_file(files["lock"])
+                if text and json.loads(text).get("pid") == os.getpid():
+                    os.unlink(files["lock"])
+            except (storage.StorageError, ValueError, OSError):
+                pass
+
+
+def background_status(repo):
+    """For --doctor: running (dict or None), the last outcome (dict or None) and the last error line of the log."""
+    files = background_files(repo)
+    try:
+        status = json.loads(storage.read_file(files["status"]) or "null")
+    except (storage.StorageError, ValueError, OSError):
+        status = None
+    last_error = ""
+    try:
+        for line in (storage.read_file(files["log"]) or "").split("\n"):
+            if " error" in line:
+                last_error = line
+    except (storage.StorageError, OSError):
+        pass
+    return running(repo), status if isinstance(status, dict) else None, last_error
 
 
 def read_resume(db, repo, hub, timeout):
@@ -677,6 +859,10 @@ def main(argv=None):
     p.add_argument("--rebuild", action="store_true", help="drop everything in the index and read it all again")
     p.add_argument("--timeout", type=int, default=120, help="seconds allowed per gh call")
     p.add_argument("--deadline", type=int, help="seconds for the whole sync; it stops there and keeps what it has")
+    p.add_argument("--background", action="store_true",
+                   help="run as the background sync the hooks start: under a lock, logging to sync.log in the private "
+                        "folder, for at most background_sync_seconds (default 300)")
+    p.add_argument("--lock-held", action="store_true", help=argparse.SUPPRESS)
     p = sub.add_parser("query", help="answer from the index, with no network")
     p.add_argument("name", choices=["brief", "consistency", "impact", "timeline", "triage"])
     p.add_argument("--path")
@@ -691,6 +877,8 @@ def main(argv=None):
     config = ghim.load_config()
     repo = ghim.resolve_repo(args.repo, config)
     hub = config.get("hub") if config.get("repo", "").lower() == repo.lower() else None
+    if args.command == "sync" and args.background:
+        return background_sync(repo, hub, args.deadline or background_budget(config), lock_held=args.lock_held)
     if args.command == "sync":
         print(ghim.describe(config, repo))
         summary = sync(repo, hub, rebuild=args.rebuild, timeout=args.timeout, deadline=args.deadline)

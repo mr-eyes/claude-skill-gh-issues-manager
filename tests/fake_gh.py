@@ -15,6 +15,7 @@ Fault switches:
   FAKE_GH_CORRUPT=1              store bodies with one character changed
   FAKE_GH_FAIL_ON_LABELS=1       exit 1 for an issue edit that adds or removes labels
   FAKE_GH_IGNORE_LABELS=1        accept label changes in an issue edit but do not apply them
+  FAKE_GH_FAIL_ON_PAGE=2         exit 1 when page 2 of a listing is asked for
   FAKE_GH_SLEEP=5                sleep before answering
 """
 
@@ -89,6 +90,20 @@ def api_comment(state, repo, cid):
         "issue_url": "https://api.github.com/repos/%s/issues/%d" % (repo, comment["issue"]),
         "html_url": "https://github.com/%s/issues/%d#issuecomment-%s" % (repo, comment["issue"], cid),
     }
+
+
+def page_of(path):
+    match = re.search(r"[?&]page=(\d+)", path)
+    return int(match.group(1)) if match else None
+
+
+def one_page(rows, path):
+    """The page a listing call asks for, as GitHub serves it; FAKE_GH_FAIL_ON_PAGE fails on one page."""
+    page = page_of(path)
+    if os.environ.get("FAKE_GH_FAIL_ON_PAGE") == str(page):
+        fail("gh: simulated failure on page %d (HTTP 502)" % page)
+    size = int((re.search(r"[?&]per_page=(\d+)", path) or [None, "30"])[1])
+    return rows[(page - 1) * size:page * size]
 
 
 def repo_of(fields):
@@ -281,6 +296,11 @@ def main():
             api_repo = path.split("/issues")[0][6:]
             rows = [api_comment(state, api_repo, c) for c in sorted(state["comments"], key=int)]
             rows = [r for r in rows if not since or r["updated_at"] >= since]
+            rows.sort(key=lambda r: (r["updated_at"], r["id"]))
+            if page_of(path):
+                sys.stdout.write(json.dumps(one_page(rows, path)))
+                save(state)
+                return
             # the real gh prints one JSON array per page, back to back
             sys.stdout.write(json.dumps(rows[:1]) + json.dumps(rows[1:]))
             save(state)
@@ -289,6 +309,11 @@ def main():
             api_repo = path.split("/issues")[0][6:]
             rows = [api_issue(state, api_repo, n) for n in sorted(state["issues"], key=int)]
             rows = [r for r in rows if not since or r["updated_at"] >= since]
+            if page_of(path):
+                rows.sort(key=lambda r: (r["updated_at"], r["number"]))
+                sys.stdout.write(json.dumps(one_page(rows, path)))
+                save(state)
+                return
             sys.stdout.write(json.dumps(rows[:2]) + json.dumps(rows[2:]))
             save(state)
             return
