@@ -5,9 +5,12 @@ comment: lints the draft, posts it with `gh issue comment --body-file`, fetches
 the stored comment from the API and compares it with the draft.
 
 body: lints the draft, prints a diff against the body now on GitHub, saves the
-old body to a backup file, edits the issue and reads it back. Use it when a
-conclusion changes: the draft carries the new current state plus the replaced
-text in a folded <details> block.
+old body to a backup file, edits the issue and reads it back. Use it when what
+the deliverable says changes: the draft is the whole new text, with no folded
+old text. For a final record the section labels then follow the headings: the
+labels of new sections are added, those of removed sections are removed, and
+the labels are read back. To convert a body of an older form and keep it as a
+comment, use convert_body.py.
 
 Examples:
   post_verified.py comment --issue 12 --kind result --body-file .tmp/result.md --dry-run
@@ -17,6 +20,7 @@ Examples:
 
 import argparse
 import difflib
+import json
 import os
 import re
 import sys
@@ -26,7 +30,7 @@ import ghim  # noqa: E402
 import lint_drafts  # noqa: E402
 
 
-def lint(path, text, kind, repo, config, offline):
+def lint(path, text, kind, repo, config, offline, labels=None, profiles=None):
     cache = {}
 
     def checker(number):
@@ -34,7 +38,7 @@ def lint(path, text, kind, repo, config, offline):
             cache[number] = ghim.number_exists(repo, number)
         return cache[number]
 
-    findings = lint_drafts.lint_text(text, kind=kind, config=config,
+    findings = lint_drafts.lint_text(text, kind=kind, config=config, labels=labels, profiles=profiles,
                                      number_checker=None if offline else checker)
     return lint_drafts.report(path, findings)
 
@@ -53,6 +57,8 @@ def main(argv=None):
                        help="with --dry-run: no network access at all (bare #N is not checked)")
         if name == "body":
             p.add_argument("--backup", help="file that receives the body being replaced (required unless --dry-run)")
+            p.add_argument("--profile", help="comma-separated profiles that define a final record's section "
+                           "headings (default: profiles in .gh-issues-manager.json)")
     args = parser.parse_args(argv)
     if args.offline and not args.dry_run:
         parser.error("--offline only makes sense with --dry-run")
@@ -63,7 +69,19 @@ def main(argv=None):
     if not os.path.isfile(args.body_file):
         sys.exit("error: not a file: %s" % args.body_file)
     draft = ghim.read_text(args.body_file)
-    if lint(args.body_file, draft, args.kind, repo, config, args.offline):
+    profiles = [p.strip() for p in (getattr(args, "profile", None) or ",".join(config.get("profiles") or [])).split(",")
+                if p.strip()]
+    follow = args.command == "body" and args.kind == "final-record" and not args.offline
+    current_labels = wanted = None
+    if follow:
+        current_labels = ghim.read_issue(repo, args.issue)["labels"]
+        try:
+            wanted, problems = ghim.labels_from_headings(draft, profiles, intended=current_labels)
+        except ValueError as error:
+            sys.exit("error: %s" % error)
+        if problems:
+            wanted = None
+    if lint(args.body_file, draft, args.kind, repo, config, args.offline, labels=wanted, profiles=profiles):
         print("not posted: fix the errors above")
         return 1
 
@@ -85,17 +103,37 @@ def main(argv=None):
     command = ["issue", "edit", str(args.issue), "--repo", repo, "--body-file", args.body_file]
     if args.dry_run and args.offline:
         print("would run: " + ghim.show_command(command, "%d characters" % len(draft)))
+        if args.kind == "final-record":
+            print("section labels not checked: --offline reads nothing from GitHub")
         return 0
+    labels_command = None
+    if follow:
+        add, remove = ghim.label_changes(current_labels, wanted, profiles)
+        if add:
+            have = {l["name"].lower() for l in json.loads(ghim.gh(
+                ["label", "list", "--repo", repo, "--json", "name", "--limit", "1000"]))}
+            missing = [label for label in add if label.lower() not in have]
+            if missing:
+                print("not posted: these labels do not exist in %s: %s; run setup_labels.py first"
+                      % (repo, ", ".join(missing)))
+                return 1
+        if add or remove:
+            labels_command = ghim.label_command(repo, args.issue, add, remove)
     old = ghim.read_issue_body(repo, args.issue)
     diff = list(difflib.unified_diff(ghim.normalize(old).split("\n"), ghim.normalize(draft).split("\n"),
                                      "%s#%d now" % (repo, args.issue), args.body_file, lineterm=""))
-    if not diff:
+    if not diff and not labels_command:
         print("no change: %s#%d already matches %s" % (repo, args.issue, args.body_file))
         return 0
     print("\n".join(diff))
     if args.dry_run:
-        print("would run: " + ghim.show_command(command, "%d characters" % len(draft)))
+        if diff:
+            print("would run: " + ghim.show_command(command, "%d characters" % len(draft)))
+        if labels_command:
+            print("would run: " + ghim.show_command(labels_command, "section labels follow the headings"))
         return 0
+    if not diff:
+        return follow_labels(repo, args.issue, labels_command, wanted, profiles)
     if not args.backup:
         sys.exit("error: --backup FILE is required so the replaced body is kept")
     if os.path.exists(args.backup):
@@ -106,7 +144,24 @@ def main(argv=None):
     ghim.gh(command)
     print("ran: " + ghim.show_command(command))
     ok = ghim.verify_body(draft, ghim.read_issue_body(repo, args.issue), "%s#%d" % (repo, args.issue))
-    return 0 if ok else 1
+    if not ok:
+        return 1
+    return follow_labels(repo, args.issue, labels_command, wanted, profiles) if follow else 0
+
+
+def follow_labels(repo, number, command, wanted, profiles):
+    """Apply the section-label change, read the labels back and compare."""
+    if command:
+        ghim.gh(command)
+        print("ran: " + ghim.show_command(command))
+    now = ghim.read_issue(repo, number)["labels"]
+    add, remove = ghim.label_changes(now, wanted, profiles)
+    if add or remove:
+        print("MISMATCH: labels of %s#%d read back as %s; still to add: %s; still to remove: %s"
+              % (repo, number, ", ".join(now) or "none", ", ".join(add) or "none", ", ".join(remove) or "none"))
+        return 1
+    print("verified: section labels of %s#%d follow the headings (%s)" % (repo, number, ", ".join(wanted) or "none"))
+    return 0
 
 
 if __name__ == "__main__":

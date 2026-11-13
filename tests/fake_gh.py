@@ -124,7 +124,18 @@ def main():
     elif words == "issue edit":
         if args[2] not in state["issues"]:
             fail("gh: Not Found (HTTP 404)")
-        state["issues"][args[2]]["body"] = body_from(args)
+        issue = state["issues"][args[2]]
+        names = {l["name"].lower() for l in state["labels"]}
+        for label in option(args, "--add-label", many=True):
+            if label.lower() not in names:
+                fail("could not add label: '%s' not found" % label)
+        if "--body-file" in args:
+            issue["body"] = body_from(args)
+        for label in option(args, "--add-label", many=True):
+            if label not in issue.setdefault("labels", []):
+                issue["labels"].append(label)
+        removed = option(args, "--remove-label", many=True)
+        issue["labels"] = [l for l in issue.get("labels", []) if l not in removed]
         print("https://github.com/%s/issues/%s" % (repo, args[2]))
     elif words == "issue comment":
         if args[2] not in state["issues"]:
