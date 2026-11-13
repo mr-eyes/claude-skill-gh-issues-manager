@@ -4,7 +4,7 @@ Make the reader accept a newline inside a quoted field.
 
 ## Destination topic
 
-NEW-reader: the result of this task is copied there when the task ends.
+NEW-reader: the result of this task is posted there as a dated comment when the task ends, and enters that topic's body only once it is adopted.
 
 ## Done when
 

@@ -10,6 +10,6 @@
 
 **Where recorded:** {{chat, email, meeting notes, review comment: enough to find it again}}
 
-**Effect:** {{what changes because of it: settings, scope, which numbers are current}}
+**Effect:** {{what changes because of it: settings, scope, which numbers are current, which body text changes}}
 
 **Next step:** {{step}}, owner {{owner}}

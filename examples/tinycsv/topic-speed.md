@@ -1,49 +1,23 @@
-## Current state
+# Read speed against the standard library
 
-At commit 4f2a9c1, tinycsv reads the 100 MB benchmark file in a median of 1.84 s over 5 runs, against 1.21 s for the standard library on the same machine. tinycsv is slower on all 3 of 3 benchmark files.
+This body is the benchmark-note text for the sections below: the current version only, ready to copy. The comments on this issue are its history (dated results, decisions, failures and corrections) and are never benchmark-note text.
 
-As of 2026-03-04 14:10 PST. Feeds: benchmark note, results. Hub: NEW-hub.
+## Methods
 
-## Methods and settings
-
-`bench/run.py` reads each file 5 times in a fresh process and reports the median wall time. Python 3.12, one thread, bench data v1 (three files: 1 MB, 10 MB, 100 MB).
+Read speed was measured on three files of 1 MB, 10 MB and 100 MB. Each file was read 5 times by tinycsv and 5 times by the standard library's `csv` module, each read in a fresh process so that no read reuses the work of an earlier one, and the median wall time is reported. All reads ran on one laptop with Python 3.12 and one thread.
 
 ## Results
 
-| Measure | Value | Denominator | Run or version | Source path |
-|---|---|---|---|---|
-| Median read time, 100 MB, tinycsv | 1.84 s | 5 runs | run-0304, commit 4f2a9c1 | `bench/out/run-0304/summary.tsv` |
-| Median read time, 100 MB, standard library | 1.21 s | 5 runs | run-0304 | `bench/out/run-0304/summary.tsv` |
-| Files where tinycsv is slower | 3 | 3 | run-0304 | `bench/out/run-0304/summary.tsv` |
+tinycsv read the 100 MB file in a median of 1.84 s over 5 runs, against 1.21 s for the standard library. tinycsv was slower on 3 of 3 files.
 
-## Decisions
+## Limitations
 
-None so far.
+The measurements come from one machine and one Python version. Memory use was not measured. The reader measured does not support newlines inside quoted fields, so files that contain them are not represented.
 
-## Negative results and limitations
+## Sources
 
-tinycsv is slower than the standard library on every file measured. One machine, one Python version.
-
-## Not established
-
-Memory use was not measured. Speed after the quoted-newline change is not known; the numbers above are for commit 4f2a9c1 only.
-
-## Open work
-
-| Item | Next step | Owner |
-|---|---|---|
-| Rerun after the reader change | Run `bench/run.py` on the new commit | Claude session |
-
-## Code and evidence
-
-| Kind | Reference | What it is |
-|---|---|---|
-| Path | `bench/out/run-0304/summary.tsv` | Medians per file and reader |
-
-## Provenance
-
-Result comment of 2026-03-04 on this issue.
-
-## Related topics
-
-NEW-reader holds the correctness results for the same commit.
+| Statement or number | Source |
+|---|---|
+| Medians of 1.84 s and 1.21 s over 5 runs; slower on 3 of 3 files | `bench/out/run-0304/summary.tsv`, commit 4f2a9c1 |
+| Benchmark files | bench data v1 under `bench/data/` |
+| Timing method | `bench/run.py`, commit 4f2a9c1 |

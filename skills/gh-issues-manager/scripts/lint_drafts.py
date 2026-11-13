@@ -4,12 +4,17 @@
 Checks: required sections for the kind of draft, placeholders left in the text,
 bare #N references, body length, Mermaid rules, the resume block of a hub,
 verbatim quotes in decisions, secrets and project-defined restricted patterns.
+A final-record draft is deliverable text: it may hold no history (no "As of"
+line, no <details> block, no headings for decisions, open work, provenance or
+next steps, no dated headings), and its section headings must belong to the
+project's profiles and agree with the labels the issue will carry.
 
 Read-only. With --online it asks GitHub whether each bare #N exists; without it
 no network access happens.
 
 Examples:
   lint_drafts.py --kind final-record drafts/topic-parser.md
+  lint_drafts.py --kind final-record --labels ms:methods,ms:results drafts/topic-parser.md
   lint_drafts.py --kind result --repo owner/name --online drafts/result.md
   lint_drafts.py --manifest drafts/manifest.json
 """
@@ -23,18 +28,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 
-FINAL_RECORD_SECTIONS = [
-    "## Current state",
-    "## Methods and settings",
-    "## Results",
-    "## Decisions",
-    "## Negative results and limitations",
-    "## Not established",
-    "## Open work",
-    "## Code and evidence",
-    "## Provenance",
-    "## Related topics",
-]
+# A final record holds the deliverable's sections, named by the profile, then Sources.
+FINAL_RECORD_SECTIONS = ["## " + ghim.SOURCES_HEADING]
+
+# Headings that carry history or planning, which belong in comments and active issues.
+HISTORY_HEADING = re.compile(
+    r"^(?:decisions|decision (?:record|log|table)|open (?:work|questions|items)|provenance"
+    r"|next(?: (?:steps?|actions?|work))?|current state)(?![\w-])", re.I)
+DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 RESUME_FIELDS = [
     "**Last updated:**",
@@ -48,11 +49,12 @@ RESUME_FIELDS = [
 KINDS = {
     "hub": {
         "sections": [
+            "## Deliverable text",
             "## Resume here",
             "## Project",
             "## Map",
             "## Deliverable sections",
-            "## Number sources",
+            "## Active issues",
             "## Pull requests",
             "## Labels",
             "## Older tracker",
@@ -299,14 +301,91 @@ def check_sections(text, kind, template, add):
                 "section '%s' is empty; write 'None' and why rather than leaving it blank" % marker)
 
 
+def check_final_record(text, template, labels, profiles, add):
+    """Deliverable text only: a title line, the profile's sections, Sources last, and no history."""
+    rows = [(n, l) for n, l, region in split_regions(text) if region == "prose"]
+    first = next(((n, l) for n, l in rows if l.strip()), (0, ""))
+    if not re.match(r"^# \S", first[1]):
+        add("error", "title-line", first[0], "a final record starts with a title line: '# <topic as the deliverable names it>'")
+
+    for number, line in rows:
+        line = strip_inline_code(line)
+        if re.match(r"^[\s>*_]*as of\b", line, re.I):
+            add("error", "as-of", number,
+                "no 'As of' line: the body is the current text only; dates belong in the comments")
+        if re.search(r"<details\b", line, re.I):
+            add("error", "details-block", number,
+                "no <details> block: replaced text is not kept in the body; GitHub's edit history and the "
+                "dated comment that caused the change are the trail")
+        heading = re.match(r"^#{1,6} +(.*?)\s*#*\s*$", line)
+        if heading:
+            title = heading.group(1).strip().rstrip(":")
+            if HISTORY_HEADING.match(title):
+                add("error", "history-heading", number,
+                    "heading '%s' holds history or planning: decisions go in decision comments, open work and "
+                    "next steps in active issues, provenance in comments or Sources" % title)
+            if DATE.search(title):
+                add("error", "dated-heading", number,
+                    "dated heading '%s': the body holds the current text only, without dates" % title)
+
+    sections = ghim.body_sections(text)
+    names = [title for _, title in sections]
+    source = ghim.SOURCES_HEADING
+    if not [title for title in names if title.lower() != source.lower()]:
+        add("error", "no-sections", 0, "no '## ' section before '## %s'; write the text for at least one "
+            "section of the deliverable" % source)
+    if names and names[-1].lower() != source.lower() and any(t.lower() == source.lower() for t in names):
+        add("error", "sources-last", 0, "'## %s' must be the last section" % source)
+    if template:
+        return
+
+    everything = text.split("\n")
+    for index, (number, title) in enumerate(sections):
+        stop = sections[index + 1][0] if index + 1 < len(sections) else len(everything) + 1
+        if title.lower() == source.lower():
+            continue  # checked with the required sections
+        if not any(line.strip() for line in everything[number:stop - 1]):
+            add("error", "section-empty", number, "section '## %s' is empty; a section without text is "
+                "removed, together with its label" % title)
+
+    if not profiles:
+        return
+    try:
+        wanted, problems = ghim.labels_from_headings(text, profiles, intended=labels)
+    except ValueError as error:
+        add("error", "profile", 0, str(error))
+        return
+    for number, message in problems:
+        add("error", "section-heading", number, message)
+    if labels is None or problems:
+        return
+    headings = dict(ghim.section_labels(profiles))
+    for label in wanted:
+        if label not in labels:
+            add("error", "section-labels", 0,
+                "the body has the section for %s, but the issue's labels do not include it" % label)
+    for label in labels:
+        if label in headings and label not in wanted:
+            add("error", "section-labels", 0,
+                "the issue is labeled %s, but the body has no '## %s' section; remove the label or add "
+                "the section" % (label, headings[label]))
+
+
 def lint_text(text, kind="generic", template=False, allow_placeholders=False,
-              known_keys=None, known_numbers=None, number_checker=None, config=None):
+              known_keys=None, known_numbers=None, number_checker=None, config=None,
+              labels=None, profiles=None):
     """Return a list of Finding for one draft.
 
     known_numbers: set of issue numbers known to exist (offline check).
     number_checker: callable(int) -> bool used when a number is not in known_numbers.
+    labels: the labels the issue will carry; for a final record its section labels
+    must agree with its section headings. None skips that comparison.
+    profiles: the profiles whose section headings a final record may use;
+    default: "profiles" of the project configuration.
     """
     config = config or {}
+    if profiles is None:
+        profiles = config.get("profiles") or []
     findings = []
 
     def add(level, code, line, message):
@@ -388,6 +467,9 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
                 "#%d not checked against the target repository (use --online or --known-numbers)" % ref)
 
     check_sections(text, kind, template, add)
+
+    if kind == "final-record":
+        check_final_record(text, template, labels, profiles, add)
 
     if kind != "resume" and (ghim.RESUME_START in text or ghim.RESUME_END in text):
         add("error", "resume-markers-misplaced", 0,
@@ -507,6 +589,10 @@ def main(argv=None):
     parser.add_argument("--online", action="store_true", help="ask GitHub whether each bare #N exists (read-only)")
     parser.add_argument("--known-numbers", help="comma-separated issue numbers that exist in the target repository")
     parser.add_argument("--allow-placeholders", action="store_true", help="accept NEW-<key> placeholders")
+    parser.add_argument("--labels", help="comma-separated labels the issue will carry; a final record's section "
+                        "labels must agree with its headings (the manifest gives each issue's labels)")
+    parser.add_argument("--profile", help="comma-separated profiles that define the section headings "
+                        "(default: profiles in .gh-issues-manager.json)")
     parser.add_argument("--template", action="store_true", help="lint a template: {{fields}} and empty sections are fine")
     parser.add_argument("--strict", action="store_true", help="treat warnings as errors")
     args = parser.parse_args(argv)
@@ -527,18 +613,23 @@ def main(argv=None):
                 cache[number] = ghim.number_exists(repo, number)
             return cache[number]
 
-    jobs = [(path, args.kind, args.allow_placeholders, None) for path in args.files]
+    labels = [l.strip() for l in args.labels.split(",") if l.strip()] if args.labels else None
+    profiles = [p.strip() for p in args.profile.split(",") if p.strip()] if args.profile else None
+    jobs = [(path, args.kind, args.allow_placeholders, None, labels) for path in args.files]
     if args.manifest:
         manifest = load_manifest(args.manifest)
         keys = {item["key"] for item in manifest.get("issues", [])}
-        for item in manifest.get("issues", []) + manifest.get("comments", []):
-            jobs.append((item["_path"], item["kind"], True, keys))
+        for item in manifest.get("issues", []):
+            jobs.append((item["_path"], item["kind"], True, keys, item["labels"]))
+        for item in manifest.get("comments", []):
+            jobs.append((item["_path"], item["kind"], True, keys, None))
 
     total = 0
-    for path, kind, allow, keys in jobs:
+    for path, kind, allow, keys, intended in jobs:
         findings = lint_text(ghim.read_text(path), kind=kind, template=args.template,
                              allow_placeholders=allow, known_keys=keys,
-                             known_numbers=known, number_checker=checker, config=config)
+                             known_numbers=known, number_checker=checker, config=config,
+                             labels=intended, profiles=profiles)
         if args.strict:
             for finding in findings:
                 finding.level = "error"

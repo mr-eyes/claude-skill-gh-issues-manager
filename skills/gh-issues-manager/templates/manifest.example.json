@@ -2,7 +2,7 @@
   "repo": "owner/name",
   "issues": [
     {"key": "hub", "kind": "hub", "title": "Project hub", "labels": ["hub"], "body_file": "hub.md", "pin": true},
-    {"key": "parser", "kind": "final-record", "title": "Parser", "labels": ["final-record", "topic:parser"], "body_file": "topic-parser.md"}
+    {"key": "parser", "kind": "final-record", "title": "Parser", "labels": ["final-record", "rd:methods", "topic:parser"], "body_file": "topic-parser.md"}
   ],
   "comments": [
     {"issue": "NEW-hub", "kind": "resume", "body_file": "resume-1.md"},

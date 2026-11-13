@@ -1,60 +1,19 @@
-## Current state
+# {{Topic, as the deliverable names it}}
 
-{{The conclusion as it stands now, in two to six sentences, with numbers and their denominators. State the data version, code version and configuration the numbers come from.}}
+This body is the {{deliverable, for example "manuscript"}} text for the sections below: the current version only, ready to copy. The comments on this issue are its history (dated results, decisions, failures and corrections) and are never deliverable text.
 
-As of {{YYYY-MM-DD HH:MM ZONE}}. Feeds: {{deliverable sections}}. Hub: {{NEW-hub or issue number}}.
+## {{Section heading from the profile, for example Methods}}
 
-<!-- When the conclusion changes, edit the text above and move the replaced text into a block like this one, newest first:
-<details>
-<summary>Replaced on YYYY-MM-DD HH:MM ZONE: one-line reason</summary>
+{{The text for this section, in the deliverable's voice. Every number with its denominator. A design choice with its reason in one sentence. A limitation stated as a property of the final method or result, not as the story of an attempt. No dates, version history, decisions, open work, job identifiers or links to older trackers.}}
 
-The earlier text, unchanged.
+## {{Next section heading from the profile, for example Results}}
 
-</details>
--->
+{{The text for this section, written the same way.}}
 
-## Methods and settings
+## Sources
 
-{{What was done and with which settings, tools and versions, in enough detail to write the methods section from this text alone.}}
+| Statement or number | Source |
+|---|---|
+| {{the number or claim as it appears above}} | {{file, table, commit or tag; a resource release such as a reference build may be named here}} |
 
-## Results
-
-{{Tables and statements. Every number with its denominator and source path. One run per table; never mix runs or configurations in one table.}}
-
-| Measure | Value | Denominator | Run or version | Source path |
-|---|---|---|---|---|
-| {{measure}} | {{value}} | {{of how many}} | {{run id, commit}} | {{path}} |
-
-## Decisions
-
-| Date and time | Decided by | Exact words | Where recorded |
-|---|---|---|---|
-| {{YYYY-MM-DD HH:MM ZONE}} | {{name or role}} | "{{the decider's words, unchanged}}" | {{link to the decision comment}} |
-
-## Negative results and limitations
-
-{{What was tried and did not work, with numbers. What the results do not cover. "None so far" is an acceptable entry.}}
-
-## Not established
-
-{{What has not been tested or shown. Not tested is not negative; missing is not zero. List each open claim and what would settle it.}}
-
-## Open work
-
-| Item | Next step | Owner |
-|---|---|---|
-| {{item}} | {{next step}} | {{owner}} |
-
-## Code and evidence
-
-| Kind | Reference | What it is |
-|---|---|---|
-| {{pull request, commit, path, job}} | {{reference}} | {{one line}} |
-
-## Provenance
-
-{{Links to every source this record was written from: dated comments, older tracker items as owner/repo#N, documents, logs.}}
-
-## Related topics
-
-{{Other topic issues and how they relate, or "None."}}
+<!-- One "## " section per deliverable section this topic feeds, in the deliverable's order, with the headings the profile defines (references/profiles.md); delete the sections it does not feed. The issue carries exactly the section labels of these headings. In a project whose profiles define no section labels, use plain "## " headings for the parts of the text; the body still holds the current text only and no history. Commits and tags appear only under Sources. -->

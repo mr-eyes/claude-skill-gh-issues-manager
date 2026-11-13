@@ -8,4 +8,4 @@
 
 **Why:** {{how the error happened and how the right value was checked}}
 
-**Also updated:** {{current-state section, hub rows and other places changed because of this, or "Nothing else"}}
+**Also updated:** {{topic bodies, section labels, hub rows and other places changed because of this, or "Nothing else"}}

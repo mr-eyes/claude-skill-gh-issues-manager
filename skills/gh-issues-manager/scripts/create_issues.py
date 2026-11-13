@@ -74,7 +74,8 @@ def lint_all(manifest, config):
     errors = 0
     for item in manifest["issues"] + manifest["comments"]:
         findings = lint_drafts.lint_text(ghim.read_text(item["_path"]), kind=item["kind"],
-                                         allow_placeholders=True, known_keys=keys, config=config)
+                                         allow_placeholders=True, known_keys=keys, config=config,
+                                         labels=item.get("labels") if item in manifest["issues"] else None)
         findings = [f for f in findings if not (f.code == "bare-ref" and f.level == "warning")]
         errors += lint_drafts.report(item["_path"], findings, quiet=True)
     return errors
@@ -88,7 +89,8 @@ def final_lint(text, item, repo, numbers, config, checked):
             checked[(repo, number)] = ghim.number_exists(repo, number)
         return checked[(repo, number)]
 
-    findings = lint_drafts.lint_text(text, kind=item["kind"], number_checker=checker, config=config)
+    findings = lint_drafts.lint_text(text, kind=item["kind"], number_checker=checker, config=config,
+                                     labels=item.get("labels") if "key" in item else None)
     return lint_drafts.report(item["_path"], findings, quiet=True)
 
 

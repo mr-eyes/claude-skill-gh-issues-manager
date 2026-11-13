@@ -1,3 +1,7 @@
+## Deliverable text
+
+The body of every issue that carries a deliverable-section label is the text for that section of the release notes or the benchmark note: the current version only, in the deliverable's voice, ready to copy. Whoever assembles a deliverable reads those bodies and nothing else. Changing what a deliverable says is an edit of the body; a result that leaves a deliverable leaves the body, and the section label comes off with it. Comments are the history (dated results, decisions with the decider's words, failures and corrections) and never deliverable text. Work in development lives in issues labeled `active`, which carry no section labels; its result enters a body once it is adopted.
+
 ## Resume here
 
 The current resume block is the newest comment on this issue that carries the resume markers and was posted by an account the reader has allowed, as found by `resume_block.py show` from the gh-issues-manager skill. A comment headed "Resume block" from anyone else is not it. A new one is posted at the end of every working stretch; resume comments are never edited, and the older ones stay as history.
@@ -20,28 +24,29 @@ flowchart LR
 
 ## Deliverable sections
 
-One table per section of the deliverable. A topic may feed several sections.
+The issues whose bodies make up each section, sections in the order of each deliverable. A topic appears once for each section its body has. Numbers are not repeated here; they live in the bodies, each with its source.
 
-### Release notes 0.3.0: fixed
+### Release notes 0.3.0
 
-| Topic issue | What it contributes | State |
+| Section | Issue | What its body covers |
 |---|---|---|
-| NEW-reader | Quoted fields and mixed line endings are parsed correctly | in progress |
+| Changed | NEW-reader | Strict quoting as the default |
+| Fixed | NEW-reader | Quoted fields and mixed line endings |
+| Known issues | NEW-reader | Newlines inside quoted fields; untested inputs |
 
-### Benchmark note: results
+### Benchmark note
 
-| Topic issue | What it contributes | State |
+| Section | Issue | What its body covers |
 |---|---|---|
-| NEW-speed | Read time against the standard library on three files | current for commit 4f2a9c1 |
+| Methods | NEW-speed | How read time is measured |
+| Results | NEW-speed | Read time against the standard library |
+| Limitations | NEW-speed | What the measurements do not cover |
 
-## Number sources
+## Active issues
 
-Every headline number, with the one run it comes from. Numbers from different rows are never combined.
-
-| Number | Value and denominator | Data version | Code version | Configuration | Source path or link | Topic |
-|---|---|---|---|---|---|---|
-| Conformance files passing | 41 of 53 | conformance set v2 | 4f2a9c1 | strict quoting | `tests/conformance/report-4f2a9c1.txt` | NEW-reader |
-| Median read time, 100 MB file | 1.84 s, median of 5 runs | bench data v1 | 4f2a9c1 | Python 3.12, one thread | `bench/out/run-0304/summary.tsv` | NEW-speed |
+| Issue | Work in development | Destination topic |
+|---|---|---|
+| NEW-task-newlines | Newlines inside quoted fields | NEW-reader |
 
 ## Pull requests
 
@@ -54,11 +59,11 @@ Every headline number, with the one run it comes from. Numbers from different ro
 | Label | Meaning |
 |---|---|
 | `hub` | This issue |
-| `final-record` | Self-contained record of one topic |
-| `active` | Bounded task in progress; names its destination topic |
+| `final-record` | Topic issue: the body is current deliverable text, the comments are its history |
+| `active` | Work in development; names its destination topic; carries no section labels |
 | `needs-decision` | Waiting for a decision from the owner |
-| `rel:added`, `rel:changed`, `rel:fixed`, `rel:docs`, `rel:known-issues` | The part of the release notes the issue feeds |
-| `rd:question`, `rd:methods`, `rd:results`, `rd:limitations`, `rd:next` | The part of the benchmark note the issue feeds |
+| `rel:added`, `rel:changed`, `rel:fixed`, `rel:docs`, `rel:known-issues` | The body is release-notes text for Added, Changed, Fixed, Documentation or Known issues |
+| `rd:question`, `rd:methods`, `rd:results`, `rd:limitations`, `rd:next` | The body is benchmark-note text for Question, Methods, Results, Limitations or Recommendations |
 | `topic:reader`, `topic:speed` | Topic |
 
 ## Older tracker
@@ -68,10 +73,10 @@ None. The project started here.
 ## Recording rules
 
 1. Every finished experiment, decision, failure and merged change becomes a dated comment on its topic issue, written from the comment templates.
-2. A decision by the owner is quoted word for word with date, time and zone.
-3. Every number carries its denominator and its source path, and is checked against the source before posting.
-4. When a conclusion changes, the topic's "Current state" is edited, the replaced text is kept below it in a folded block with its date, and the row here is updated. Posted comments are never rewritten; a correction is a new comment.
-5. A bounded task gets an issue labeled `active` that names its destination topic. When it ends, its result is copied into that topic and the task is closed.
+2. A decision by the owner is quoted word for word with date, time and zone, in a decision comment.
+3. Every number carries its denominator, is checked against its source before posting, and in a body has its file, table, commit or tag under "Sources".
+4. When what the release notes or the benchmark note say changes, the topic's body is edited in place, with no folded old text, and the event comment that caused the change is posted. Section labels follow the body's headings. Posted comments are never rewritten; a correction is a new comment.
+5. Work in development gets an issue labeled `active` that names its destination topic. Its result enters the topic's body only once it is adopted (merged, integrated, released); then the task is closed.
 6. Every issue and pull request is labeled when opened, and every pull request names its topic issue.
 7. References outside this repository are written as `owner/repo#N` or a full URL.
 8. A new resume comment is posted on this issue at the end of every working stretch. Resume comments are never edited.
