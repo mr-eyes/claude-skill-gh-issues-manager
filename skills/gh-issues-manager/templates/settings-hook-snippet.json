@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "\"$HOME/.claude/skills/gh-issues-manager/scripts/session_start_hook.sh\"",
-            "timeout": 15
+            "timeout": 20
           }
         ]
       }

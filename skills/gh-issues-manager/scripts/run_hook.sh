@@ -11,8 +11,11 @@ event="${1:-}"
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null || exit 0
-limit="${GHIM_HOOK_TIMEOUT:-10}"   # seconds the Python side plans for
-hard=$((limit + 5))                # safety net if it overruns
+limit="${GHIM_HOOK_TIMEOUT:-10}"   # seconds the Python side plans for: half for the sync, the rest for the brief
+case "$limit" in ''|*[!0-9]*) limit=10;; esac   # digits only; never evaluated as an expression
+case "$limit" in ?????*) limit=10;; esac        # and not absurdly long
+export GHIM_HOOK_TIMEOUT="$limit"
+hard=$((limit + 3))                # safety net, below the hook's own timeout in hooks.json
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$hard" python3 "$here/hooks.py" "$event" 2>/dev/null

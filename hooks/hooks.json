@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/session_start_hook.sh",
-            "timeout": 15
+            "timeout": 20
           }
         ]
       }

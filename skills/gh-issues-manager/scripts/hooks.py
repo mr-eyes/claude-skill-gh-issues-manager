@@ -30,10 +30,14 @@ Examples:
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
+import re
+import signal
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
@@ -72,7 +76,10 @@ def load_state(repo):
 
 
 def save_state(repo, state):
-    sessions = sorted(state.items(), key=lambda kv: kv[1].get("seen", 0))[-50:]  # keep the newest sessions only
+    def seen(item):
+        value = item[1].get("seen", 0)
+        return value if isinstance(value, (int, float)) else 0
+    sessions = sorted(state.items(), key=seen)[-50:]  # keep the 50 sessions used most recently
     storage.write_file(state_path(repo), json.dumps(dict(sessions)))
 
 
@@ -80,11 +87,35 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+class OutOfTime(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def alarm(seconds):
+    """Interrupt the block after `seconds`, where the platform allows it, so a slow GitHub cannot eat the budget."""
+    if not hasattr(signal, "setitimer"):
+        yield
+        return
+
+    def ring(signum, frame):
+        raise OutOfTime()
+
+    previous = signal.signal(signal.SIGALRM, ring)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
 def configured():
     """(config, repo, hub) when the project is set up and trusted, else None."""
     config = ghim.load_config()
     repo, hub = config.get("repo"), config.get("hub")
-    if not isinstance(repo, str) or "/" not in repo or not isinstance(hub, int):
+    if not isinstance(repo, str) or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo) or isinstance(hub, bool) or \
+            not isinstance(hub, int) or hub < 1:
         return None
     if repo.lower() not in ghim.trusted_repos():
         return None
@@ -123,17 +154,18 @@ def run(event, data, budget):
 def produce(event, data, budget, config, repo, hub):
     fresh, failure = None, ""
     if event == "session-start":
+        share = max(1.0, budget / 2.0)  # the sync gets half the budget; the rest is for the brief
         try:
-            index.sync(repo, hub, timeout=max(2, budget // 3), deadline=max(2, budget - 2), timeline_cap=10,
-                       log=lambda *a: None)
+            with alarm(share + 0.5):
+                index.sync(repo, hub, timeout=share, deadline=share, timeline_cap=10, log=lambda *a: None)
             fresh = True
         except storage.StorageError:
             raise
         except Exception as error:  # noqa: BLE001 - the cached index is used
             fresh = False
-            failure = "GitHub could not be read (%s)" % ("timed out" if "timed out" in str(error) else
-                                                         "gh failed" if isinstance(error, ghim.GhError) else
-                                                         type(error).__name__)
+            slow = isinstance(error, OutOfTime) or "timed out" in str(error) or "deadline" in str(error)
+            failure = "GitHub could not be read (%s)" % ("timed out" if slow else "gh failed"
+                                                         if isinstance(error, ghim.GhError) else type(error).__name__)
     db = index.connect(repo, create=False)  # raises for an index that must not be read
     if db is None or not index.get_meta(db, "synced_at"):
         if db is not None:
@@ -166,7 +198,7 @@ def produce(event, data, budget, config, repo, hub):
         show = entry.get("key") != key or entry["count"] % every == 0
         if show:
             entry["key"] = key
-        entry["seen"] = entry["count"] + len(state)
+        entry["seen"] = time.time()
         state[session] = entry
         save_state(repo, state)
         return brief.prompt_payload(record) if show else ""
@@ -180,7 +212,7 @@ def remember(repo, session, key, injected):
         entry = state.get(session, {"count": 0})
         if injected:
             entry["key"] = key
-        entry["seen"] = entry.get("count", 0) + len(state)
+        entry["seen"] = time.time()
         state[session] = entry
         save_state(repo, state)
     except (OSError, storage.StorageError):
@@ -280,6 +312,9 @@ def doctor():
         print("index: synced %s (%s)%s; %s" % (synced or "never", index.age_text(synced),
                                                "" if index.get_meta(db, "sync_complete") != "0" else ", incomplete",
                                                ", ".join("%s %d" % item for item in index.describe_index(db).items())))
+        moved = index.get_meta(db, "moved_aside")
+        if moved:
+            print("an earlier index was refused and moved aside to %s" % moved)
         failure = index.get_meta(db, "last_sync_error")
         print("last sync failure: %s" % (failure or "none since the last good sync"))
         print("resume block: %s" % (index.get_meta(db, "resume_note") or "not read"))
