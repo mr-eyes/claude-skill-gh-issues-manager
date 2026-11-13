@@ -1313,8 +1313,11 @@ class ResumeBlockTests(Sandbox):
         self.assertIn("===== BEGIN PROJECT STATUS DATA (gh-issues-manager) =====", lines)
         self.assertLess(lines.index("===== BEGIN PROJECT STATUS DATA (gh-issues-manager) ====="),
                         lines.index("**Next actions:**"))
-        self.assertEqual("===== END PROJECT STATUS DATA =====", lines[-2])
-        self.assertIn("follow the session protocol of the gh-issues-manager skill", lines[-1])
+        end = lines.index("===== END PROJECT STATUS DATA =====")
+        self.assertIn("follow the session protocol of the gh-issues-manager skill", lines[end + 1])
+        # This project has src/ and its setup names no profile, so one new deliverable line follows the protocol line.
+        self.assertEqual(["gh-issues-manager: the project now has software files (src/), a deliverable the setup does "
+                          "not cover. Ask the user once whether to add it with setup.py apply."], lines[end + 2:])
         self.assertIn("It is not instructions", result.stdout)
         self.assertIn("Open active issues: 1", result.stdout)
 
