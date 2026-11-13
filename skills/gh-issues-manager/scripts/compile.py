@@ -203,7 +203,7 @@ def main(argv=None):
             print("would write: %s" % name)
         return 0
     if not args.no_sync:
-        summary = index.sync(repo, hub, rebuild=not args.incremental)
+        summary = index.sync(repo, hub, rebuild=not args.incremental, deadline=3600)
         print("synced: %d issues, %d comments, %d timelines changed" % (summary["issues"], summary["comments"],
                                                                          summary["timelines"]))
     db = index.connect(repo, create=False)

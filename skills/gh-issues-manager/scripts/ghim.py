@@ -327,8 +327,10 @@ def load_profile(name, shipped_only=False):
     is in the current folder; only a name that is not a shipped profile is read
     as a path (setup_labels.py --profile path/to/custom.json).
     """
-    shipped = os.path.join(PROFILE_DIR, "%s.json" % name)
-    if isinstance(name, str) and PROFILE_NAME.fullmatch(name) and os.path.isfile(shipped):
+    if not isinstance(name, str):
+        raise ValueError("a profile is named by a string, not %s" % type(name).__name__)
+    shipped = os.path.join(PROFILE_DIR, name + ".json")
+    if PROFILE_NAME.fullmatch(name) and os.path.isfile(shipped):
         path = shipped
     elif shipped_only:
         raise ValueError("no shipped profile %r" % name)

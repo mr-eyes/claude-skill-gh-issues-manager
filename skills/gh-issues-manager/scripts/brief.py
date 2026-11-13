@@ -102,7 +102,10 @@ class Record:
 
     def freshness(self, fresh):
         """fresh: True (just synced), False (sync failed, cached index used) or None (index only, by design)."""
-        if fresh:
+        if fresh == "partial":
+            return ("partly refreshed: more to read than fits in a session start, continuing in the background; "
+                    "last complete sync %s UTC, %s" % (self.synced or "at an unknown time", index.age_text(self.synced)))
+        if fresh is True:
             return "read from GitHub just now"
         if fresh is False:
             return "cached, not refreshed (index synced %s UTC, %s): GitHub could not be read just now" % (
@@ -169,7 +172,7 @@ def session_payload(record, fresh):
     note = index.get_meta(record.db, "resume_note") or "not read"
     days = resume_days(record.config)
     read_at = index.get_meta(record.db, "resume_read_at")
-    if resume and fresh is False and days_old(read_at) > days:
+    if resume and fresh in (False, "partial") and days_old(read_at) > days:
         note = ("left out: the cached copy was read %s, longer ago than the limit of %s day%s (resume_cache_days in "
                 ".gh-issues-manager.json); read the hub's newest resume comment"
                 % (index.age_text(read_at), days, "" if days == 1 else "s"))

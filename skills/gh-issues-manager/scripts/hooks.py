@@ -167,6 +167,7 @@ STORAGE_REASONS = {
     "key": "the plugin's key is empty or damaged",
     "changed": "the index changed while it was being opened",
     "name": "the repository name cannot be used as a folder name",
+    "lock": "the sync lock could not be taken",
 }
 
 
@@ -226,8 +227,12 @@ def produce(event, data, budget, config, repo, hub):
                     summary = index.sync(repo, hub, timeout=share, deadline=share, timeline_cap=10, log=lambda *a: None)
                 fresh = True
                 if not summary["complete"]:
-                    fresh = False  # part was read; say it is not fully refreshed
-                    failure = "GitHub could not be read (timed out)"
+                    if summary.get("pages"):
+                        fresh = "partial"  # part was read; the rest continues in the background
+                        failure = "more to read than fits in a session start; continuing in the background"
+                    else:
+                        fresh = False  # GitHub did not answer in time; nothing was read
+                        failure = "GitHub could not be read (timed out)"
                     start_background(repo, config)  # a large backlog catches up without blocking sessions
             except storage.StorageError:
                 raise
@@ -250,6 +255,10 @@ def produce(event, data, budget, config, repo, hub):
     elif db is None:
         if event == "subagent-start" and index.running(repo):
             return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": BUILDING}})
+        if event == "prompt-submit":
+            if not index.running(repo):
+                start_background(repo, config)  # a build that was stopped or killed goes on; starting it is quick
+            return ""
         raise Unavailable("there is no local index yet; the next session start builds it")
     try:
         if failure:
@@ -266,8 +275,6 @@ def produce(event, data, budget, config, repo, hub):
         if event == "pre-compact":
             return brief.precompact_payload(record)
         settings = config.get("prompt_hook") if isinstance(config.get("prompt_hook"), dict) else {}
-        if settings.get("enabled") is False:
-            return ""
         every = settings.get("every") if isinstance(settings.get("every"), int) and settings.get("every") > 0 else 10
         key = digest(record.key())
         state = load_state(repo)
@@ -275,11 +282,17 @@ def produce(event, data, budget, config, repo, hub):
         entry["count"] = entry.get("count", 0) + 1
         entry["seen"] = time.time()
         if entry.get("brief") is not True:
-            # The session started without a brief (first build, or no SessionStart): give the full brief once.
+            # The session started without a brief (first build, or no SessionStart): give the full brief once,
+            # also when the one-line reminder is switched off. Build the text first, then record that it was given.
+            text = brief.session_payload(record, None)
             entry.update(brief=True, key=key)
             state[session] = entry
             save_state(repo, state)
-            return brief.session_payload(record, None)
+            return text
+        if settings.get("enabled") is False:
+            state[session] = entry
+            save_state(repo, state)
+            return ""
         show = entry.get("key") != key or entry["count"] % every == 0
         if show:
             entry["key"] = key
