@@ -33,7 +33,9 @@ import graphql_check  # noqa: E402
 import lint_drafts  # noqa: E402
 
 REPO = "example-org/tinycsv"
-ALL_LABELS = ["hub", "final-record", "active", "rel:fixed", "rd:results", "topic:reader", "topic:speed"]
+ALL_LABELS = ["hub", "final-record", "active", "rel:changed", "rel:fixed", "rel:known-issues", "rd:methods",
+              "rd:results", "rd:limitations", "topic:reader", "topic:speed"]
+EXAMPLE_CONFIG = {"profiles": ["software", "research"]}
 
 
 def codes(findings, level="error"):
@@ -107,9 +109,11 @@ class LintTests(unittest.TestCase):
     def test_example_drafts_pass(self):
         manifest = lint_drafts.load_manifest(os.path.join(EXAMPLE, "manifest.json"))
         keys = {i["key"] for i in manifest["issues"]}
+        self.assertEqual(EXAMPLE_CONFIG["profiles"],
+                         json.loads(ghim.read_text(os.path.join(EXAMPLE, ".gh-issues-manager.json")))["profiles"])
         for item in manifest["issues"] + manifest["comments"]:
-            findings = self.lint(ghim.read_text(item["_path"]), kind=item["kind"],
-                                 allow_placeholders=True, known_keys=keys)
+            findings = self.lint(ghim.read_text(item["_path"]), kind=item["kind"], config=EXAMPLE_CONFIG,
+                                 allow_placeholders=True, known_keys=keys, labels=item.get("labels"))
             self.assertEqual([], [str(f) for f in findings], item["body_file"])
 
     def test_bare_reference(self):
@@ -153,14 +157,78 @@ class LintTests(unittest.TestCase):
         text = ghim.read_text(os.path.join(EXAMPLE, "topic-speed.md"))
         ok = dict(kind="final-record", allow_placeholders=True)
         self.assertEqual([], codes(self.lint(text, **ok)))
-        missing = text.replace("## Not established", "## Unknowns")
-        self.assertIn("section-missing", codes(self.lint(missing, **ok)))
-        emptied = re.sub(r"(## Not established\n).*?(\n## Open work)", r"\1\2", text, flags=re.S)
-        self.assertIn("section-empty", codes(self.lint(emptied, **ok)))
-        a, b = text.index("## Results"), text.index("## Decisions")
-        c = text.index("## Negative results")
-        swapped = text[:a] + text[b:c] + text[a:b] + text[c:]
-        self.assertIn("section-order", codes(self.lint(swapped, **ok)))
+        self.assertIn("section-missing", codes(self.lint(text.replace("## Sources", "## References"), **ok)))
+        emptied = re.sub(r"(## Limitations\n).*?(\n## Sources)", r"\1\2", text, flags=re.S)
+        self.assertEqual(["section-empty"], codes(self.lint(emptied, **ok)))
+        no_sources_text = re.sub(r"(## Sources\n).*", r"\1", text, flags=re.S)
+        self.assertEqual(["section-empty"], codes(self.lint(no_sources_text, **ok)))
+        a, b = text.index("## Limitations"), text.index("## Sources")
+        self.assertIn("sources-last", codes(self.lint(text[:a] + text[b:] + "\n" + text[a:b], **ok)))
+        self.assertIn("title-line", codes(self.lint(text.split("\n", 1)[1], **ok)))
+        only_sources = text[:text.index("## Methods")] + text[b:]
+        self.assertEqual(["no-sections"], codes(self.lint(only_sources, **ok)))
+
+    def test_final_record_rejects_history(self):
+        text = ghim.read_text(os.path.join(EXAMPLE, "topic-speed.md"))
+        ok = dict(kind="final-record", config=EXAMPLE_CONFIG,
+                  labels=["final-record", "rd:methods", "rd:results", "rd:limitations", "topic:speed"])
+        self.assertEqual([], codes(self.lint(text, **ok)))
+        results = "## Results\n"
+        cases = {
+            "as-of": results + "As of 2026-03-04 14:10 PST.\n\n",
+            "details-block": results + "<details>\n<summary>Replaced on 2026-03-04 13:20 PST: rerun</summary>\n\n"
+                             "1.79 s over 3 runs.\n\n</details>\n\n",
+            "dated-heading": results + "### Rerun of 2026-03-09\n\nSame medians.\n\n",
+        }
+        for heading in ("Decisions", "Decision record", "Open work", "Open questions", "Provenance",
+                        "Next steps", "Next", "Current state"):
+            cases["history-heading " + heading] = results + "### %s\n\nText.\n\n" % heading
+        for name, insert in cases.items():
+            findings = codes(self.lint(text.replace(results, insert, 1), **ok))
+            self.assertIn(name.split(" ")[0], findings, name)
+        # a level-2 history heading is also not a section of the deliverable
+        decisions = text.replace("## Sources", "## Decisions\n\n| Date | Words |\n|---|---|\n| x | y |\n\n## Sources")
+        self.assertEqual(["history-heading", "section-heading"], codes(self.lint(decisions, **ok)))
+        # negative control: a record body of the older form fails on every count
+        before = ghim.read_text(os.path.join(FIXTURES, "record-body-before.md"))
+        found = codes(self.lint(before, kind="final-record", config=EXAMPLE_CONFIG, labels=["rd:results"],
+                                known_numbers={1, 2}))
+        for code in ("title-line", "as-of", "details-block", "history-heading", "section-heading", "section-missing"):
+            self.assertIn(code, found)
+
+    def test_final_record_history_checks_stay_quiet_on_ordinary_text(self):
+        text = ghim.read_text(os.path.join(EXAMPLE, "topic-speed.md"))
+        quiet = text.replace("## Results\n", "## Results\n\n### Decision thresholds\n\nA read counts as slow above "
+                             "2 s.\n\n### Next-generation readers\n\nNone measured. Measured as of now, with "
+                             "`<details>` in code only.\n\n```\nAs of 2026-03-04 14:10 PST\n## Decisions\n```\n\n", 1)
+        self.assertEqual([], [str(f) for f in self.lint(quiet, kind="final-record", config=EXAMPLE_CONFIG)])
+        # a project whose profiles define no section labels may use any plain headings
+        plain = text.replace("## Methods", "## How it was measured")
+        self.assertEqual([], codes(self.lint(plain, kind="final-record", config={"profiles": ["core"]})))
+        self.assertIn("section-heading", codes(self.lint(plain, kind="final-record", config=EXAMPLE_CONFIG)))
+
+    def test_section_labels_follow_headings(self):
+        text = ghim.read_text(os.path.join(EXAMPLE, "topic-reader.md"))
+        labels = ["final-record", "rel:changed", "rel:fixed", "rel:known-issues", "topic:reader"]
+        ok = dict(kind="final-record", config=EXAMPLE_CONFIG)
+        self.assertEqual([], codes(self.lint(text, labels=labels, **ok)))
+        self.assertEqual([], codes(self.lint(text, **ok)))  # without labels only the headings are checked
+        missing_label = [l for l in labels if l != "rel:known-issues"]
+        self.assertEqual(["section-labels"], codes(self.lint(text, labels=missing_label, **ok)))
+        extra_label = labels + ["rel:docs"]
+        found = self.lint(text, labels=extra_label, **ok)
+        self.assertEqual(["section-labels"], codes(found))
+        self.assertIn("no '## Documentation' section", str(found[0]))
+        dropped = re.sub(r"## Known issues\n.*?(?=## Sources)", "", text, flags=re.S)
+        self.assertEqual(["section-labels"], codes(self.lint(dropped, labels=labels, **ok)))
+        self.assertEqual([], codes(self.lint(dropped, labels=missing_label, **ok)))
+        self.assertEqual(["section-heading"], codes(self.lint(text.replace("## Fixed", "## Fixes"), **ok)))
+        # the same heading in two profiles is settled by the intended labels, or reported
+        mixed = dict(kind="final-record", config={"profiles": ["research", "manuscript"]})
+        speed = ghim.read_text(os.path.join(EXAMPLE, "topic-speed.md"))
+        self.assertEqual(["section-heading"], codes(self.lint(speed, **mixed)))
+        self.assertEqual([], codes(self.lint(speed, labels=["ms:methods", "ms:results", "ms:limitations"], **mixed)))
+        self.assertEqual(["profile"], codes(self.lint(speed, kind="final-record", config={"profiles": ["nosuch"]})))
 
     def test_decision_needs_exact_words(self):
         text = ghim.read_text(os.path.join(EXAMPLE, "decision-reader-1.md"))
@@ -263,6 +331,42 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(["Field 'lastEditedBy' doesn't exist on type 'IssueComment'"], graphql_check.check(wrong))
         self.assertTrue(graphql_check.check("{ repository(owner: \"o\", nam: \"r\") { issue(number: 1) { author } } }"))
 
+    def test_profiles_name_a_heading_for_every_section_label(self):
+        expected = {
+            "manuscript": ["ms:background", "ms:methods", "ms:results", "ms:limitations", "ms:supplement"],
+            "software": ["rel:added", "rel:changed", "rel:fixed", "rel:docs", "rel:known-issues"],
+            "research": ["rd:question", "rd:methods", "rd:results", "rd:limitations", "rd:next"],
+            "prototyping": ["proto:hypothesis", "proto:setup", "proto:results", "proto:limitations", "proto:go-no-go"],
+        }
+        for name, labels in expected.items():
+            profile = ghim.load_profile(name)
+            self.assertEqual(labels, [l["name"] for l in profile["labels"]], name)
+            headings = [l["heading"] for l in profile["labels"]]
+            self.assertEqual(len(headings), len(set(headings)), name)
+            for label in profile["labels"]:
+                self.assertTrue(label["description"].startswith("Issue body is "), label)
+                self.assertLessEqual(len(label["description"]), 100)
+                self.assertFalse(lint_drafts.HISTORY_HEADING.match(label["heading"]), label)
+        self.assertEqual([], ghim.section_labels(["core"]))
+        with self.assertRaises(ValueError):
+            ghim.load_profile("nosuch")
+
+    def test_labels_from_headings_and_label_changes(self):
+        body = "# T\n\n## Methods\n\nx\n\n```\n## Fixed\n```\n\n## Results ##\n\ny\n\n## Sources\n\nz\n"
+        self.assertEqual([(3, "Methods"), (11, "Results")], ghim.body_sections(body)[:2])
+        self.assertEqual((["rd:methods", "rd:results"], []), ghim.labels_from_headings(body, ["software", "research"]))
+        labels, problems = ghim.labels_from_headings(body, ["research", "manuscript"])
+        self.assertEqual([], labels)
+        self.assertIn("rd:methods and ms:methods", problems[0][1])
+        self.assertEqual((["ms:methods", "ms:results"], []),
+                         ghim.labels_from_headings(body, ["research", "manuscript"], intended=["ms:results", "ms:methods"]))
+        self.assertEqual(([], []), ghim.labels_from_headings(body, ["core"]))
+        current = ["final-record", "rel:fixed", "rd:results", "topic:speed", "bug"]
+        self.assertEqual((["rd:methods"], ["rel:fixed"]),
+                         ghim.label_changes(current, ["rd:methods", "rd:results"], ["software", "research"]))
+        self.assertEqual(["issue", "edit", "7", "--repo", "o/r", "--add-label", "a", "--remove-label", "b"],
+                         ghim.label_command("o/r", 7, ["a"], ["b"]))
+
     def test_manifest_rejects_comma_labels_and_repeated_files(self):
         folder = tempfile.mkdtemp(prefix="manifest-", dir=os.path.join(ROOT, ".tmp"))
         if not os.environ.get("GHIM_TEST_KEEP"):
@@ -332,7 +436,9 @@ class CreateIssuesTests(Sandbox):
         self.assertTrue(hub.get("pinned"))
         self.assertEqual(["hub"], hub["labels"])
         self.assertIn('READER["Issue 5 Reader"]', hub["body"])
-        self.assertIn("| #5 | Quoted fields", hub["body"])
+        self.assertIn("| Fixed | #5 | Quoted fields", hub["body"])
+        self.assertEqual(["final-record", "rel:changed", "rel:fixed", "rel:known-issues", "topic:reader"],
+                         data["issues"]["5"]["labels"])
         self.assertIn("see #5.", data["comments"]["9100"]["body"])
         everything = [i["body"] for i in data["issues"].values()] + [c["body"] for c in data["comments"].values()]
         self.assertFalse(any("NEW-" in body for body in everything))
@@ -432,7 +538,7 @@ class CreateIssuesTests(Sandbox):
     def test_lint_error_stops_everything(self):
         self.add_labels()
         path = os.path.join(self.drafts, "topic-speed.md")
-        text = ghim.read_text(path).replace("## Not established", "## Unknowns")
+        text = ghim.read_text(path).replace("## Results\n", "## Results\n\nAs of 2026-03-04 14:10 PST.\n")
         with open(path, "w") as handle:
             handle.write(text)
         result = self.run_script("create_issues.py", "--manifest", self.manifest)
@@ -515,6 +621,148 @@ class PostVerifiedTests(Sandbox):
         self.assertIn("## Destination topic", self.repo()["issues"]["3"]["body"])
         again = self.run_script("post_verified.py", *args, "--backup", backup)
         self.assertIn("no change", again.stdout)
+
+
+    def test_final_record_edit_moves_section_labels(self):
+        self.add_labels()
+        text = ghim.read_text(os.path.join(self.drafts, "topic-reader.md"))
+        data = self.repo()
+        data["issues"]["11"] = {"title": "Reader", "body": text, "user": "octo-dev",
+                                "labels": ["final-record", "rel:changed", "rel:fixed", "rel:known-issues", "topic:reader"]}
+        with open(self.state, "w") as handle:
+            json.dump(data, handle)
+        fixed = text.replace("- A newline inside a quoted field is not supported. Each of the 12 conformance files that "
+                             "fail, of 53, contains one.\n", "")
+        fixed = re.sub(r"## Known issues\n.*?(?=## Sources)", "", fixed, flags=re.S)
+        draft = self.write("reader.md", fixed)
+        args = ["body", "--repo", REPO, "--issue", "11", "--kind", "final-record", "--body-file", draft,
+                "--profile", "software,research"]
+        dry = self.run_script("post_verified.py", *args, "--dry-run")
+        self.assertEqual(0, dry.returncode, dry.stdout + dry.stderr)
+        self.assertIn("would run: gh issue edit 11 --repo example-org/tinycsv --remove-label rel:known-issues", dry.stdout)
+        self.assertEqual([], self.calls("issue edit"))
+        done = self.run_script("post_verified.py", *args, "--backup", os.path.join(self.dir, "reader-before.md"))
+        self.assertEqual(0, done.returncode, done.stdout + done.stderr)
+        self.assertIn("verified: section labels of example-org/tinycsv#11 follow the headings", done.stdout)
+        issue = self.repo()["issues"]["11"]
+        self.assertEqual(["final-record", "rel:changed", "rel:fixed", "topic:reader"], issue["labels"])
+        self.assertNotIn("Known issues", issue["body"])
+        history = self.write("history.md", fixed.replace("## Fixed\n", "## Fixed\n\nAs of 2026-03-09 10:00 PST.\n"))
+        refused = self.run_script("post_verified.py", "body", "--repo", REPO, "--issue", "11", "--kind", "final-record",
+                                  "--body-file", history, "--backup", os.path.join(self.dir, "b2.md"))
+        self.assertEqual(1, refused.returncode)
+        self.assertIn("[as-of]", refused.stdout)
+
+
+class ConvertBodyTests(Sandbox):
+    """Issue 10 holds a record body of the older form; the example's speed topic is its new text."""
+
+    NOTE = "Replaced on 2026-03-09 11:20 PST by the benchmark-note text, when the tracker moved to deliverable bodies."
+
+    def setUp(self):
+        super().setUp()
+        self.add_labels()
+        self.before = ghim.read_text(os.path.join(FIXTURES, "record-body-before.md"))
+        data = self.repo()
+        data["issues"]["10"] = {"title": "Read speed against the standard library", "body": self.before,
+                                "labels": ["final-record", "rel:fixed", "rd:results", "topic:speed"], "user": "octo-dev"}
+        self.save(data)
+        self.expected = self.write("speed.live.md", self.before)
+        self.new = os.path.join(self.drafts, "topic-speed.md")
+
+    def save(self, data):
+        with open(self.state, "w") as handle:
+            json.dump(data, handle)
+
+    def convert(self, *extra, env=None, body_file=None):
+        return self.run_script("convert_body.py", "--repo", REPO, "--issue", "10", "--profile", "software,research",
+                               "--body-file", body_file or self.new, "--expected", self.expected,
+                               "--note", self.NOTE, *extra, env=env)
+
+    def record_comments(self):
+        return [c for c in self.repo()["comments"].values()
+                if c["issue"] == 10 and c["body"].startswith(ghim.RECORD_HEADING)]
+
+    def test_dry_run_writes_nothing(self):
+        result = self.convert("--dry-run")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("  | " + ghim.RECORD_HEADING, result.stdout)
+        self.assertIn("  | ## Current state", result.stdout)
+        self.assertIn("would run: gh issue comment 10", result.stdout)
+        self.assertIn("would run: gh issue edit 10 --repo example-org/tinycsv --body-file", result.stdout)
+        self.assertIn("--add-label rd:methods --add-label rd:limitations --remove-label rel:fixed", result.stdout)
+        self.assertEqual([], self.calls("issue comment"))
+        self.assertEqual([], self.calls("issue edit"))
+        self.assertEqual(self.before, self.repo()["issues"]["10"]["body"])
+
+    def test_conversion_keeps_the_former_body_then_replaces_it(self):
+        result = self.convert()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(3, result.stdout.count("verified:"), result.stdout)
+        records = self.record_comments()
+        self.assertEqual(1, len(records))
+        record = records[0]["body"].replace("\r\n", "\n")
+        self.assertTrue(record.startswith(ghim.RECORD_HEADING + "\n\n" + self.NOTE + "\n\n---\n\n## Current state"))
+        self.assertEqual(ghim.normalize(self.before), ghim.normalize(record.split("\n---\n\n", 1)[1]))
+        issue = self.repo()["issues"]["10"]
+        self.assertEqual(ghim.normalize(ghim.read_text(self.new)), ghim.normalize(issue["body"]))
+        self.assertEqual(["final-record", "rd:results", "topic:speed", "rd:methods", "rd:limitations"], issue["labels"])
+        again = self.convert()
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertIn("already holds", again.stdout)
+        self.assertEqual(1, len(self.calls("issue comment")))
+        self.assertEqual(2, len(self.calls("issue edit")))
+
+    def test_a_changed_live_body_stops_before_anything_is_written(self):
+        data = self.repo()
+        data["issues"]["10"]["body"] += "\nA line someone added in the browser."
+        self.save(data)
+        result = self.convert()
+        self.assertEqual(1, result.returncode)
+        self.assertIn("stopped: the live body of example-org/tinycsv#10 differs", result.stdout)
+        self.assertEqual([], self.calls("issue comment"))
+        self.assertEqual([], self.calls("issue edit"))
+
+    def test_a_body_changed_after_the_record_comment_is_not_replaced(self):
+        result = self.convert(env={"FAKE_GH_CHANGE_ON_READ": "2"})
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("the live body changed after the record comment was posted", result.stdout)
+        self.assertEqual(1, len(self.record_comments()))
+        self.assertEqual([], self.calls("issue edit"))
+        self.assertIn("Edited by someone else meanwhile.", self.repo()["issues"]["10"]["body"])
+
+    def test_rerun_after_a_failed_edit_adopts_the_record_comment(self):
+        broken = self.convert(env={"FAKE_GH_FAIL_ON": "issue edit"})
+        self.assertNotEqual(0, broken.returncode)
+        self.assertEqual(1, len(self.record_comments()))
+        self.assertEqual(self.before, self.repo()["issues"]["10"]["body"])
+        fixed = self.convert()
+        self.assertEqual(0, fixed.returncode, fixed.stdout + fixed.stderr)
+        self.assertIn("found: the record comment is already on the issue", fixed.stdout)
+        self.assertEqual(1, len(self.record_comments()))
+        self.assertEqual(1, len(self.calls("issue comment")))
+
+    def test_a_body_with_history_is_refused(self):
+        draft = self.write("speed-with-history.md", ghim.read_text(self.new).replace(
+            "## Results\n", "## Results\n\nAs of 2026-03-04 14:10 PST.\n"))
+        result = self.convert(body_file=draft)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("[as-of]", result.stdout)
+        self.assertEqual([], self.calls("issue comment"))
+        self.assertEqual([], self.calls("issue edit"))
+
+    def test_missing_label_or_bad_note_stops(self):
+        data = self.repo()
+        data["labels"] = [l for l in data["labels"] if l["name"] != "rd:limitations"]
+        self.save(data)
+        result = self.convert()
+        self.assertEqual(1, result.returncode)
+        self.assertIn("these labels do not exist in example-org/tinycsv: rd:limitations", result.stdout)
+        self.assertEqual([], self.calls("issue comment"))
+        undated = self.run_script("convert_body.py", "--repo", REPO, "--issue", "10", "--body-file", self.new,
+                                  "--expected", self.expected, "--note", "Replaced today.")
+        self.assertNotEqual(0, undated.returncode)
+        self.assertIn("date, time and zone", undated.stderr)
 
 
 class ResumeBlockTests(Sandbox):
