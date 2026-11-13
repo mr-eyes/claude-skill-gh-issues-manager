@@ -40,11 +40,23 @@ A broken diagram shows as a red error box in place of the map, and the preview i
 
 | Pitfall | Rule |
 |---|---|
-| Numbers from different runs or configurations combined in one statement | One run per table; the hub's number-sources table names data version, code version and configuration for each headline number |
-| A superseded number presented as current | "Current state" is edited when it changes; the old text goes into a dated folded block |
+| Numbers from different runs or configurations combined in one statement | One run per table in result comments; in a body, every number's source under "Sources", and a consistency pass over all bodies before assembly |
+| A superseded number presented as current | The body is edited in place when the number changes; the comment that caused the change says why |
 | A number without its denominator | Value and denominator, every time |
 | A number typed from memory or from a summary | Read it from the source file while drafting, and name the path |
-| "Missing" read as zero, "not tested" read as negative | Every final record and result has a "Not established" section that may not be empty |
+| "Missing" read as zero, "not tested" read as negative | Every result and failure comment has a "Not established" field that may not be empty; in a body, an untested case is a stated limitation |
+
+## Deliverable bodies
+
+| Pitfall | Rule | Enforced by |
+|---|---|---|
+| History mixed into a deliverable body: "As of" lines, dated status, decision tables, open work, provenance, job identifiers. Whoever assembles the deliverable copies it, or has to cut it out by hand | The body is the current text only; history goes into comments, work in development into `active` issues | Linter: no "As of" line, no heading for decisions, open work, provenance or next steps, no dated heading |
+| Folded "Replaced on" blocks keep old text in the body, where it is read as current or copied by mistake | Edit in place; GitHub's edit history and the dated comment are the trail | Linter: no `<details>` block in a final record |
+| Numbers repeated on the hub drift from the bodies after the next edit | The hub lists issues per section and holds no numbers from bodies; each number lives in one body | Review of the hub |
+| A long record shortened into deliverable text loses its limitations, because they read like history | Every limitation of the final method or result stays, as a property of the result; the reviewer audits exclusions hardest | Independent review per batch |
+| The same quantity, or the same term, differs between bodies written at different times | One consistency pass over all bodies together before assembly and after a batch of conversions | Review |
+| A section label stays after its text left the body, and the assembler finds an empty or missing section | Labels follow the `## ` headings | Linter: headings against labels; `post_verified.py body` and `convert_body.py` set the labels from the headings |
+| A body converted while someone else was editing it loses their edit | Draft from a saved copy of the live body; stop if the live body differs | `convert_body.py --expected` |
 
 ## Decisions and people
 

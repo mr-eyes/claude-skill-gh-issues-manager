@@ -10,7 +10,7 @@ A compacted context keeps a summary written by a model under space pressure. Tre
 
 1. **Resume block.** `python3 scripts/resume_block.py show --active` prints the newest resume comment on the hub written by an allowed account, and says how many newer ones it ignored and why. With the SessionStart hook installed the same text is already in context, marked as read from GitHub; use it if it is from this session start.
 2. **Active issues.** For every open issue labeled `active`: `gh issue view N --comments`. Read the body and at least the newest checkpoint.
-3. **Hub and topics in play.** Read the hub body (`gh issue view <hub>`), then for each topic the current focus touches, the "Current state" section and the newest comments.
+3. **Hub and topics in play.** Read the hub body (`gh issue view <hub>`), then for each topic the current focus touches, its body (what the deliverable says now) and its newest comments (what happened since).
 4. **Reality check.** Compare with what exists: `git status`, `git log`, running jobs, output files named in the newest checkpoint. A checkpoint may say "running" about something that finished or died hours ago.
 5. **Act.** Say in one line what was read ("Read hub #1, active #14, topics #5 and #7; last checkpoint 2026-03-04 16:40 PST"), then continue from the resume block's next actions.
 

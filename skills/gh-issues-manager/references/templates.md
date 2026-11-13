@@ -1,11 +1,11 @@
 # Templates and how to fill them
 
-All templates are in `templates/`. Fields to fill are written `{{like this}}`; the linter rejects a draft that still contains one. Where a field does not apply, write "None" and the reason. An empty section is an error, because a reader cannot tell "nothing to report" from "forgotten".
+All templates are in `templates/`. Fields to fill are written `{{like this}}`; the linter rejects a draft that still contains one. Where a field does not apply, write "None" and the reason. An empty section is an error, because a reader cannot tell "nothing to report" from "forgotten". The one exception is the body of a final record: a deliverable section the topic does not feed is left out, with its label.
 
 | Template | Kind for the linter | Use |
 |---|---|---|
 | `hub.md` | `hub` | The hub issue |
-| `final-record.md` | `final-record` | One per topic |
+| `final-record.md` | `final-record` | One per topic: the deliverable's text for the topic's sections, then Sources |
 | `active-task.md` | `active` | One per bounded task |
 | `comment-result.md` | `result` | Finished experiment, analysis, benchmark, merged change |
 | `comment-decision.md` | `decision` | A decision, quoted word for word |
@@ -33,6 +33,8 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 **Exclusions and failures.** Counts with reasons: "3 of 120 samples failed with out-of-memory, excluded". Write "None" only after checking.
 
 **Not established.** What the result does not show. Typical entries: not tested on other inputs; cause of a failure not shown; an effect seen once; a comparison not made on the same data.
+
+**Deliverable text.** The body of a final record is written in the deliverable's voice, as the paper, release notes or report will print it, with no "we decided", "so far" or "as of". Every number with its denominator in the sentence; its file, table, commit or tag under "Sources", and commits and tags nowhere else. One `## ` heading per deliverable section, with the heading the profile defines. A section the topic does not feed is left out, not written as "None".
 
 **Exact words.** Copy the decider's sentence from where it was said. Keep typos. If only part is relevant, quote that part whole and mark omissions with "[...]". Never tidy up a quote. If the decision came by voice and nobody wrote it down, write "Exact words not available" and what was understood, and ask the decider to confirm in writing.
 

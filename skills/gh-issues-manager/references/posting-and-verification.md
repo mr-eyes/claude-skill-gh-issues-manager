@@ -14,7 +14,7 @@ Keep the drafts folder clean. Notes, extracted tables and other scratch files go
 
 For every number in the draft, open the file named as its source and read the value there. For every quote, find the original message. For every identifier (commit, job, path), check that it exists. Memory, including a compaction summary, is not a source.
 
-For a new final record, a changed conclusion, a hub edit, or anything the deliverable will cite, ask a reviewer that does not share your context (a fresh agent, or a person) to try to break the draft. Give it the draft and the source paths, not your reasoning. Ask it to look hardest at: numbers against sources; denominators; mixed runs; exclusions and failures; claims that go beyond the evidence; things stated as negative that were only not tested. Fix what it finds, and if the review did not return, the draft is not reviewed.
+For a new topic body, a change to the deliverable text, a hub edit, or anything the deliverable will cite, ask a reviewer that does not share your context (a fresh agent, or a person) to try to break the draft. Give it the draft and the source paths, not your reasoning. Ask it to look hardest at: numbers against sources; denominators; mixed runs; exclusions and failures; claims that go beyond the evidence; things stated as negative that were only not tested. Fix what it finds, and if the review did not return, the draft is not reviewed.
 
 Routine result and checkpoint comments need the source check but not always the reviewer; decide by what a wrong post would cost.
 
@@ -34,6 +34,10 @@ python3 scripts/lint_drafts.py --kind result --repo owner/name --online draft.md
 | Body over 65,536 characters | error; warning when close |
 | Mermaid: `#`, parentheses, unquoted labels, nodes undefined or unused | error |
 | Resume comment: heading with timestamp, markers, all six fields, block length; resume markers inside a hub body | error |
+| Final record: title line, at least one section, every section filled, "Sources" last | error |
+| Final record: an "As of" line, a `<details>` block, a heading for decisions, open work, provenance or next steps, a dated heading | error |
+| Final record: a `## ` heading that is not a section heading of the project's profiles, or that two profiles share and the labels do not settle | error |
+| Final record: section labels that disagree with the headings (`--labels`, or the labels in a manifest) | error |
 | Secrets (common token formats) and the project's `restricted_patterns` | error |
 | The project's `banned_words` | error |
 
@@ -45,7 +49,8 @@ The linter does not judge content. It cannot know whether a number is right.
 |---|---|
 | Several new issues and comments | `create_issues.py --manifest <file>` |
 | One comment | `post_verified.py comment --issue N --kind <kind> --body-file <draft>` |
-| Replace an issue body | `post_verified.py body --issue N --kind <kind> --body-file <draft> --backup <file>` |
+| Replace an issue body | `post_verified.py body --issue N --kind <kind> --body-file <draft> --backup <file>`; for a final record it also moves the section labels to follow the headings |
+| Convert a record body of an older form, keeping it as a comment | `convert_body.py --issue N --body-file <draft> --expected <saved live body> --note "<when and why>"` |
 | A new resume comment on the hub | `resume_block.py update --file <draft>` |
 
 Run each with `--dry-run` first; it prints the exact `gh` commands. `post_verified.py body` prints a diff against the body now on GitHub and saves that body to the backup file before editing. To edit a body, start from the current one: `gh issue view N --json body --jq .body > draft.md`, or `gh api repos/owner/name/issues/N --jq .body`.
@@ -64,4 +69,4 @@ diff <(sed 's/[[:space:]]*$//' draft.md) <(sed 's/\r$//; s/[[:space:]]*$//' back
 
 ## What the scripts never do
 
-They never delete an issue, comment or label, never edit a posted comment, never close or reopen issues, and never post a file that was not named on the command line or in the manifest. Closing a finished task is a deliberate `gh issue close N` by the session or the owner.
+They never delete an issue, comment or label, change no label on an issue except section labels that follow its headings, never edit a posted comment, never close or reopen issues, and never post a file that was not named on the command line or in the manifest. Closing a finished task is a deliberate `gh issue close N` by the session or the owner.

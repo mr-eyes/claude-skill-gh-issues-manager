@@ -41,9 +41,9 @@ Create a drafts folder that holds nothing but drafts (for example `.tmp/drafts/b
 - one `topic-<name>.md` per topic from `templates/final-record.md`
 - optionally the first active task from `templates/active-task.md`
 
-Use `NEW-<key>` wherever an issue number belongs. A new topic's record may be thin; write what is known, and put the rest under "Not established" and "Open work" instead of leaving sections empty.
+Use `NEW-<key>` wherever an issue number belongs. A new topic's body may be short: write only text the deliverable can already use, under the headings of the sections it feeds, and leave out the sections it cannot fill yet. Open questions and work in development go into `active` issues, not into the body.
 
-List the drafts in `manifest.json` (see `templates/manifest.example.json`): for each issue a `key`, `kind`, `title`, `labels` and `body_file`; `"pin": true` for the hub.
+List the drafts in `manifest.json` (see `templates/manifest.example.json`): for each issue a `key`, `kind`, `title`, `labels` and `body_file`; `"pin": true` for the hub. The labels of a topic issue are `final-record`, its topic label and the section labels of its `## ` headings; the linter checks that headings and section labels agree.
 
 ## 5. Lint, dry-run, create
 
