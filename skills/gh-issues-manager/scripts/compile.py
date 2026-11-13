@@ -97,7 +97,7 @@ def hub_order(db, hub, profiles):
 
 
 def build(db, config, repo, hub, out, ref=None, dry_run=False):
-    profiles = config.get("profiles") or []
+    profiles = ghim.shipped_profiles(config.get("profiles"))
     plan = hub_order(db, hub, profiles)
     files = []
     issues = {r["number"]: r for r in db.execute("SELECT * FROM issues")}
@@ -220,5 +220,5 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (ghim.GhError, storage.StorageError) as error:
+    except (ghim.GhError, storage.StorageError, index.SyncBusy) as error:
         sys.exit("error: %s" % error)

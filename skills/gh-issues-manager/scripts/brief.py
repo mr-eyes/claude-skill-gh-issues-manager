@@ -77,7 +77,7 @@ class Record:
         topics = set(self.open_with("final-record"))
         out = []
         try:
-            sections = ghim.section_labels(self.profiles)
+            sections = ghim.section_labels(self.profiles, shipped_only=True)
         except ValueError:
             sections = []
         for label, heading in sections:

@@ -320,9 +320,20 @@ def read_issue_body(repo, number, timeout=60):
     return read_issue(repo, number, timeout)["body"]
 
 
-def load_profile(name):
-    """A profile from profiles/<name>.json, or from a file path. Raises ValueError when there is none."""
-    path = name if os.path.isfile(name) else os.path.join(PROFILE_DIR, name + ".json")
+def load_profile(name, shipped_only=False):
+    """A profile from profiles/<name>.json, or, unless shipped_only, from a file path. Raises ValueError when none.
+
+    A plain name always means the shipped profile, even when a file of that name
+    is in the current folder; only a name that is not a shipped profile is read
+    as a path (setup_labels.py --profile path/to/custom.json).
+    """
+    shipped = os.path.join(PROFILE_DIR, "%s.json" % name)
+    if isinstance(name, str) and PROFILE_NAME.fullmatch(name) and os.path.isfile(shipped):
+        path = shipped
+    elif shipped_only:
+        raise ValueError("no shipped profile %r" % name)
+    else:
+        path = name
     if not os.path.isfile(path):
         available = sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
         raise ValueError("no profile %r. Available: %s" % (name, ", ".join(available)))
@@ -345,7 +356,7 @@ def shipped_profiles(names):
     return out
 
 
-def section_labels(profiles):
+def section_labels(profiles, shipped_only=False):
     """The deliverable-section labels of the given profiles, as a list of (label, heading).
 
     A section label is a profile label with a "heading": the level-2 heading
@@ -355,7 +366,7 @@ def section_labels(profiles):
     """
     out = []
     for name in profiles:
-        for label in load_profile(name).get("labels", []):
+        for label in load_profile(name, shipped_only).get("labels", []):
             heading, label_name = label.get("heading"), label.get("name")
             if isinstance(heading, str) and isinstance(label_name, str) and \
                     HEADING_TEXT.fullmatch(heading) and LABEL_NAME.fullmatch(label_name):
