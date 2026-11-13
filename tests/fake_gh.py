@@ -17,6 +17,8 @@ Fault switches:
   FAKE_GH_IGNORE_LABELS=1        accept label changes in an issue edit but do not apply them
   FAKE_GH_FAIL_ON_PAGE=2         exit 1 when page 2 of a listing is asked for
   FAKE_GH_SLEEP=5                sleep before answering
+  FAKE_GH_RESUME_SLEEP=8         sleep before answering the hub comments query (the GraphQL call with a number)
+  FAKE_GH_RESUME_FAIL=1          exit 1 for the hub comments query
 """
 
 import json
@@ -219,6 +221,10 @@ def main():
             if errors:
                 fail("gh: " + errors[0]["message"])
             return
+        if os.environ.get("FAKE_GH_RESUME_SLEEP"):  # the hub comments query, read for the resume block
+            time.sleep(float(os.environ["FAKE_GH_RESUME_SLEEP"]))
+        if os.environ.get("FAKE_GH_RESUME_FAIL"):
+            fail("gh: simulated failure of the hub comments query (HTTP 502)")
         issue = state["issues"].get(fields["number"])
         if issue is None:
             print(json.dumps({"data": {"repository": {"issue": None}}}))

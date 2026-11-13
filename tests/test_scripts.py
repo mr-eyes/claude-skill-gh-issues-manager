@@ -1518,6 +1518,32 @@ class RecordSandbox(Sandbox):
         return subprocess.run(["bash", os.path.join(SCRIPTS, "run_hook.sh"), event], input=payload,
                               capture_output=True, text=True, env=full_env, cwd=self.project)
 
+    def in_process(self, extra=None):
+        """Point this process at the sandbox as the scripts see it, for code run in-process; restored at cleanup.
+        Returns the path of the sync lock."""
+        environment = {"GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1", "GHIM_GH": FAKE,
+                       "FAKE_GH_STATE": self.state, "PYTHONDONTWRITEBYTECODE": "1", "GHIM_TRUSTED_FILE": self.trusted,
+                       "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
+                       "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache"),
+                       "XDG_CONFIG_HOME": os.path.join(self.dir, "xdg-config")}
+        environment.update(extra or {})
+        removed = ("GHIM_CONFIG", "GHIM_TRUSTED_REPOS", "CLAUDE_PLUGIN_DATA")
+        saved = {k: os.environ.get(k) for k in list(environment) + list(removed)}
+
+        def restore():
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.addCleanup(restore)
+        for key in removed:
+            os.environ.pop(key, None)
+        os.environ.update(environment)
+        folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
+        return os.path.join(folder, "sync.lock")
+
     def query(self, *args):
         result = self.tool("index.py", "query", *args, "--json")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
@@ -2294,6 +2320,67 @@ class BackgroundTests(RecordSandbox):
         self.wait_background()
         self.assertEqual(["failure"], [e["type"] for e in self.query("timeline", "--issue", "6", "--type", "failure")])
 
+    def test_a_failed_resume_read_keeps_the_cached_block(self):
+        self.ready()
+        self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")
+        failed = self.tool("index.py", "sync", env={"FAKE_GH_RESUME_FAIL": "1"})
+        self.assertNotEqual(0, failed.returncode)
+        self.assertIn("hub comments query", failed.stderr)
+        session = self.hook("session-start", gh="false").stdout
+        self.assertIn("**Current focus:** Release 0.3.0", session)
+        self.assertEqual(["failure"], [e["type"] for e in self.query("timeline", "--issue", "6", "--type", "failure")])
+
+    def test_a_slow_resume_read_at_session_start_is_a_partial_refresh(self):
+        self.ready()
+        self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")
+        session = self.hook("session-start", env={"FAKE_GH_RESUME_SLEEP": "8", "GHIM_HOOK_TIMEOUT": "6"}).stdout
+        self.assertIn("partly refreshed", session.split("\n")[0])
+        self.assertIn("**Current focus:** Release 0.3.0", session)
+        self.assertIn("starting background sync from a hook", self.log())
+        self.stop_background()
+
+    def test_a_background_sync_at_its_budget_is_not_an_error(self):
+        import index as index_module
+        import signal
+        self.ready()
+        self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")
+        self.in_process({"FAKE_GH_RESUME_SLEEP": "6"})
+        previous = signal.getsignal(signal.SIGALRM)
+
+        def quiet():
+            signal.alarm(0)  # background_sync sets a hard stop for its own process; not for the test runner
+            signal.signal(signal.SIGALRM, previous)
+
+        self.addCleanup(quiet)
+        self.addCleanup(index_module.release_lock, REPO)
+        status_file = os.path.join(self.folder(), "sync-status.json")
+        self.assertEqual(0, index_module.background_sync(REPO, 4, 3))
+        quiet()
+        status = json.loads(ghim.read_text(status_file))
+        self.assertEqual("stopped at its budget; the next sync continues", status["result"])
+        self.assertEqual([], [line for line in self.log().split("\n") if " error" in line])
+        self.assertIn("; more remains", self.log())
+        os.environ.pop("FAKE_GH_RESUME_SLEEP")
+        self.assertEqual(0, index_module.background_sync(REPO, 4, 30))
+        quiet()
+        self.assertEqual("ok", json.loads(ghim.read_text(status_file))["result"])
+        self.assertIn("**Current focus:** Release 0.3.0", self.hook("session-start", gh="false").stdout)
+
+    def test_doctor_leaves_out_an_error_line_followed_by_a_finished_sync(self):
+        self.ready()
+        path = os.path.join(self.folder(), "sync.log")
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(descriptor, "a") as handle:
+            handle.write("2026-04-05T10:00:00Z background sync error: GhError: gh failed (exit 1)\n")
+        self.assertIn("last error line of the sync log: ", self.tool("hooks.py", "--doctor").stdout)
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND)
+        with os.fdopen(descriptor, "a") as handle:
+            handle.write("2026-04-05T10:05:00Z background sync finished: 1 issues, 1 comments, 1 timelines, "
+                         "0 body edits\n")
+        doctor = self.tool("hooks.py", "--doctor").stdout
+        self.assertNotIn("last error line", doctor)
+        self.assertIn("result: the hooks can show the brief", doctor)
+
 
 class RecoveryTests(RecordSandbox):
     """Syncs that fail part of the way, rebuilds without GitHub, one writer, and the edges of the hook budget."""
@@ -2337,6 +2424,38 @@ class RecoveryTests(RecordSandbox):
         rebuilt = self.tool("index.py", "sync", "--rebuild")
         self.assertIn("7 issues, 6 comments", rebuilt.stdout)
 
+    def test_a_rebuild_that_reaches_its_deadline(self):
+        self.ready()
+        before = self.tool("index.py", "status").stdout.split("\n")[1:3]  # when it was synced, and the counts
+        late = self.tool("index.py", "sync", "--rebuild", "--deadline", "1", env={"FAKE_GH_SLEEP": "3"})
+        self.assertNotEqual(0, late.returncode)  # its listing passed the deadline: nothing changes
+        self.assertIn("deadline reached", late.stderr)
+        self.assertEqual(before, self.tool("index.py", "status").stdout.split("\n")[1:3])
+        data = self.repo()
+        del data["comments"]["9001"]  # gone on GitHub: only a rebuild sees it
+        data["log"] = []
+        self.save(data)
+        slow = self.tool("index.py", "sync", "--rebuild", "--deadline", "5", env={"FAKE_GH_RESUME_SLEEP": "8"})
+        self.assertEqual(0, slow.returncode, slow.stdout + slow.stderr)
+        self.assertIn("stopped at the deadline", slow.stdout)
+        self.assertEqual(1, len([c for c in self.calls("api graphql") if "number=4" in c]))  # the resume read
+        status = self.tool("index.py", "status").stdout
+        self.assertIn(", incomplete", status)
+        self.assertIn("issues 7, comments 5", status)  # the rebuilt rows are kept
+        self.assertIn("**Current focus:** Release 0.3.0", self.hook("session-start", gh="false").stdout)
+
+    def test_the_per_call_limit_stops_a_slow_call_without_an_alarm(self):
+        import index as index_module
+        import signal
+        self.ready()
+        self.in_process({"FAKE_GH_SLEEP": "3"})
+        self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
+        start = time.time()
+        summary = index_module.sync(REPO, None, deadline=1)
+        self.assertLess(time.time() - start, 2.5)
+        self.assertFalse(summary["complete"])
+        self.assertEqual((0.0, 0.0), signal.getitimer(signal.ITIMER_REAL))
+
     def test_one_writer_at_a_time(self):
         self.ready()
         lock = os.path.join(self.folder(), "sync.lock")
@@ -2358,25 +2477,6 @@ class RecoveryTests(RecordSandbox):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertNotIn("1; rm", result.stdout + result.stderr)
 
-    def lock_environment(self):
-        """Point this process at the sandbox storage; restored at cleanup. Returns the lock path."""
-        environment = {"GHIM_DATA_HOME": self.data_home, "GHIM_TESTING": "1",
-                       "XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"),
-                       "XDG_CACHE_HOME": os.path.join(self.dir, "xdg-cache")}
-        saved = {k: os.environ.get(k) for k in environment}
-
-        def restore():
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-
-        self.addCleanup(restore)
-        os.environ.update(environment)
-        folder = sys.modules["storage"].folder(sys.modules["storage"].cache_top(), "example-org__tinycsv")
-        return os.path.join(folder, "sync.lock")
-
     def plant_lock(self, lock, pid=4194000):
         import index as index_module
         with open(lock, "w") as handle:  # pid 4194000 does not exist: a stale lock
@@ -2390,7 +2490,7 @@ class RecoveryTests(RecordSandbox):
         if "fork" not in multiprocessing.get_all_start_methods():
             self.skipTest("the lock race needs the fork start method, which this platform does not have")
         context = multiprocessing.get_context("fork")
-        lock = self.lock_environment()
+        lock = self.in_process()
 
         def widened(real):
             def call(*args):
@@ -2432,7 +2532,7 @@ class RecoveryTests(RecordSandbox):
 
     def test_a_claim_left_by_a_dead_process_does_not_block(self):
         import index as index_module
-        lock = self.lock_environment()
+        lock = self.in_process()
         self.plant_lock(lock)
         os.link(lock, lock + ".claim")  # a judge that died while it held the claim
         start = time.time()
@@ -2445,7 +2545,7 @@ class RecoveryTests(RecordSandbox):
 
     def test_a_live_lock_judged_through_the_claim_stays(self):
         import index as index_module
-        lock = self.lock_environment()
+        lock = self.in_process()
         self.plant_lock(lock, pid=os.getpid())  # this process on this host: live
         self.addCleanup(os.unlink, lock)  # before the sandbox cleanup, which stops the process a lock names
         before = ghim.read_text(lock), os.stat(lock).st_ino
@@ -2460,7 +2560,7 @@ class RecoveryTests(RecordSandbox):
     def test_a_symlinked_lock_is_refused_and_its_target_never_linked(self):
         import index as index_module
         storage_module = sys.modules["storage"]
-        lock = self.lock_environment()
+        lock = self.in_process()
         target = os.path.join(self.dir, "outside-lock")
         self.plant_lock(target)
         os.symlink(target, lock)
