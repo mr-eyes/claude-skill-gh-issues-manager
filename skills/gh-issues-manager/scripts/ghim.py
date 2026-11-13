@@ -103,12 +103,19 @@ def load_config():
     return cfg
 
 
+def config_home():
+    """$XDG_CONFIG_HOME when it is an absolute path, else ~/.config. A relative value would resolve against the
+    current folder, which can be a project's, so it is not used."""
+    value = os.environ.get("XDG_CONFIG_HOME")
+    return value if value and os.path.isabs(value) else os.path.join(os.path.expanduser("~"), ".config")
+
+
 def trusted_file():
+    """GHIM_TRUSTED_FILE when it is an absolute path, else <config home>/gh-issues-manager/trusted-repos."""
     env = os.environ.get("GHIM_TRUSTED_FILE")
-    if env:
+    if env and os.path.isabs(env):
         return env
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(base, "gh-issues-manager", "trusted-repos")
+    return os.path.join(config_home(), "gh-issues-manager", "trusted-repos")
 
 
 def trusted_repos():

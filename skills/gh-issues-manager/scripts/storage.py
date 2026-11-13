@@ -10,8 +10,10 @@ for hooks but not for the session's Bash tool, so it would split the storage
 between the two. An index left in an older plugin data folder is ignored; the
 first sync builds a new one.
 
-GHIM_DATA_HOME is for tests only: when it is an absolute path, the index and the
-state go there (the key stays under XDG_STATE_HOME).
+GHIM_DATA_HOME is for tests only, and is read only when GHIM_TESTING=1 is also
+set: the index and the state then go to $GHIM_DATA_HOME/gh-issues-manager (the
+key stays under XDG_STATE_HOME). Like every top folder, only the folder the
+plugin names, gh-issues-manager, is created or tightened.
 
 Inside the top folder the plugin keeps everything in a private folder it creates
 and controls, `private/`, with mode 0700:
@@ -59,9 +61,12 @@ def _env_dir(name, default):
 
 
 def test_home():
-    """GHIM_DATA_HOME, for tests only: one folder for the index and the state. None when unset."""
+    """$GHIM_DATA_HOME/gh-issues-manager, for tests only: one top folder for the index and the state. Read only when
+    GHIM_TESTING=1 is also set and the value is an absolute path; None otherwise."""
     value = os.environ.get("GHIM_DATA_HOME")
-    return value if value and os.path.isabs(value) else None
+    if os.environ.get("GHIM_TESTING") != "1" or not value or not os.path.isabs(value):
+        return None
+    return os.path.join(value, "gh-issues-manager")
 
 
 def cache_top():

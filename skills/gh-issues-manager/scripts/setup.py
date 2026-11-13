@@ -513,15 +513,29 @@ def unsafe_part(base, path):
     return None
 
 
-def refuse_unsafe(base, path):
+def refuse_unsafe(base, path, hint=""):
     found = unsafe_part(base, path)
     if found:
         raise SystemExit("error: not written: %s is a symlink, or not a plain file or folder; setup.py writes only plain "
-                         "files in plain folders. Nothing was changed by this step" % found)
+                         "files in plain folders. Nothing was changed by this step%s" % (found, hint))
 
 
-def write_text(path, text, dry, what, base, mode=0o644):
-    """Write a project file: no symlink on the way, a fresh temporary file in the same folder, then a move."""
+def outside(path, base):
+    """True when `path` is not `base` or a path below it (compares whole path components)."""
+    relative = os.path.relpath(os.path.abspath(path), os.path.abspath(base))
+    return relative == os.pardir or relative.startswith(os.pardir + os.sep)
+
+
+def new_file_mode():
+    """The mode a new file gets from the user's umask: 0o666 without the umask bits."""
+    mask = os.umask(0)
+    os.umask(mask)
+    return 0o666 & ~mask
+
+
+def write_text(path, text, dry, what, base):
+    """Write a project file: no symlink on the way, a fresh temporary file in the same folder, then a move. An
+    existing file keeps its mode; a new one gets the mode the user's umask gives."""
     refuse_unsafe(base, path)
     if dry:
         print("would write: %s   # %s, %d characters" % (path, what, len(text)))
@@ -535,6 +549,7 @@ def write_text(path, text, dry, what, base, mode=0o644):
         if not os.path.lexists(current):
             os.mkdir(current)
     refuse_unsafe(base, path)
+    mode = stat.S_IMODE(os.lstat(path).st_mode) if os.path.lexists(path) else new_file_mode()
     descriptor, temporary = tempfile.mkstemp(dir=folder, prefix=".part-")
     try:
         if hasattr(os, "fchmod"):
@@ -560,7 +575,7 @@ def add_trusted(repo):
     current = ghim.read_text(path) if os.path.isfile(path) else ""
     if current and not current.endswith("\n"):
         current += "\n"
-    mode = stat.S_IMODE(os.stat(path).st_mode) if os.path.isfile(path) else 0o600
+    mode = stat.S_IMODE(os.lstat(path).st_mode) if os.path.isfile(path) else 0o600  # a new list is private
     descriptor, temporary = tempfile.mkstemp(dir=folder, prefix=".part-")
     try:
         if hasattr(os, "fchmod"):
@@ -577,13 +592,14 @@ def add_trusted(repo):
 
 def apply(answers, root, dry, drafts):
     config_path = os.path.join(root, ghim.CONFIG_NAME)
-    drafts_base = root if not os.path.relpath(drafts, root).startswith(os.pardir) else os.path.dirname(drafts)
+    drafts_base = os.path.dirname(drafts) if outside(drafts, root) else root
     workflow = os.path.join(root, ".github", "workflows", "ghim-triage.yml")
     claude_md = os.path.join(root, "CLAUDE.md")
     # Every file this run may write is checked before anything is changed.
     refuse_unsafe(root, config_path)
     for name in ("hub.md", "resume-1.md", "manifest.json"):
-        refuse_unsafe(drafts_base, os.path.join(drafts, name))
+        refuse_unsafe(drafts_base, os.path.join(drafts, name), "; pass --drafts <folder> to keep the hub drafts in a "
+                      "plain folder elsewhere")
     if answers["triage_workflow"] and answers["record"] == "this":
         refuse_unsafe(root, workflow)
     if answers["claude_md"]:

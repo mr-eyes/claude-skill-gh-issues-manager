@@ -169,9 +169,8 @@ SIGNAL_WORDS = {"paper": "paper or manuscript files", "thesis": "thesis files", 
 def discovery_off():
     if os.environ.get("GHIM_DISCOVERY", "").strip().lower() in ("0", "off", "no", "false"):
         return True
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     try:
-        with open(os.path.join(base, "gh-issues-manager", "settings.json"), encoding="utf-8") as handle:
+        with open(os.path.join(ghim.config_home(), "gh-issues-manager", "settings.json"), encoding="utf-8") as handle:
             return json.load(handle).get("discovery") is False
     except (OSError, ValueError, AttributeError):
         return False
@@ -456,7 +455,7 @@ def doctor():
     print("gh: %s" % (gh.split()[0] if gh else "not found on PATH"))
     print("storage: index under %s, state and key under %s; hooks and terminal scripts resolve the same folders "
           "(CLAUDE_PLUGIN_DATA is not used)%s" % (storage.cache_top(), storage.state_top(for_key=True),
-                                                 "; GHIM_DATA_HOME is set (for tests only): index and state under %s"
+                                                 "; GHIM_TESTING and GHIM_DATA_HOME are set (for tests only): index and state under %s"
                                                  % storage.test_home() if storage.test_home() else ""))
     name = storage.repo_folder(repo)
     rows = [("index top folder", storage.cache_top(), "top"),
