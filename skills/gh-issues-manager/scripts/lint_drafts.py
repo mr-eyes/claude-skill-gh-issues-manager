@@ -127,6 +127,17 @@ KINDS = {
             "**Also updated:**",
         ],
     },
+    "triage": {
+        "header": "Triage",
+        "sections": [
+            "**Opened by:**",
+            "**Their words:**",
+            "**Type:**",
+            "**Route:**",
+            "**Reason:**",
+            "**Needs confirmation:**",
+        ],
+    },
     "resume": {"header": "Resume block", "sections": RESUME_FIELDS},
     "continuation": {"sections": []},
     "pointer": {"sections": []},
@@ -270,7 +281,7 @@ def check_sections(text, kind, template, add):
         first = nonblank[0] if nonblank else (0, "")
         if record_format.parse_marker(first[1]) or first[1].lstrip().startswith("<!-- ghim:event"):
             first = nonblank[1] if len(nonblank) > 1 else (0, "")
-        expected = r"^### %s: " % header
+        expected = r"^### %s(?: \(reconstructed\))?: " % header
         if not re.match(expected, first[1]):
             add("error", "header", first[0], "first line must start with '### %s: <date time zone> - <title>'" % header)
         elif not (template and "{{" in first[1]) and not re.match(expected + STAMP, first[1]):
@@ -428,6 +439,17 @@ def check_event_marker(text, kind, template, add):
     if stamp and stamp.group(0)[:16] != at[:16].replace("T", " "):
         add("error", "event-marker", 1, "the marker time %s and the heading time %s disagree; write the same local "
             "date and time in both" % (at, stamp.group(0)))
+    reconstructed = "(reconstructed):" in second
+    if reconstructed:
+        if not re.fullmatch(record_format.ISO, marker.get("recorded", "")):
+            add("error", "event-reconstructed", 1, "a reconstructed event's marker gives recorded=<ISO time it was "
+                "recorded>")
+        if not re.fullmatch(r"(commit|pr|issue|file|transcript):[\w./#:@+-]{1,200}", marker.get("source", "")):
+            add("error", "event-reconstructed", 1, "a reconstructed event's marker gives its dated source: "
+                "source=commit:<hash>, pr:<n>, issue:<n>, file:<path> or transcript:<path>")
+    elif "recorded" in marker or "source" in marker:
+        add("error", "event-reconstructed", 1, "recorded= and source= belong to a reconstructed event; write its "
+            "heading as '### %s (reconstructed): <original time> - <title>'" % kind.capitalize())
 
 
 def check_blocks(text, template, add):
@@ -572,10 +594,21 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
         else:
             findings.extend(lint_resume_block(ghim.extract_resume_block(text), template))
 
+    if kind == "triage" and not template:
+        type_line = re.search(r"^\*\*Type:\*\*\s*(.*)$", text, re.M)
+        if type_line and not re.match(r"`?type:[a-z0-9-]+`?\s*$", type_line.group(1).strip()):
+            add("error", "triage-type", 0, "**Type:** names one type: label, for example type:bug")
+        has_quote = any(l.lstrip().startswith(">") and l.lstrip(" >").strip()
+                        for _, l, region in split_regions(text) if region == "prose")
+        if not has_quote and "words not available" not in text.lower():
+            add("error", "triage-quote", 0, "quote the words of the person who opened the issue in a '>' block, "
+                "unchanged, or write 'Words not available' and why")
+
     if kind == "decision" and not template:
         has_quote = any(l.lstrip().startswith(">") and l.lstrip(" >").strip()
                         for _, l, region in split_regions(text) if region == "prose")
-        if not has_quote and "exact words not available" not in text.lower():
+        if not has_quote and "exact words not available" not in text.lower() and \
+                not ("(reconstructed):" in text and "decision inferred from" in text.lower()):
             add("error", "decision-quote", 0,
                 "quote the decider's exact words in a '>' block, or write 'Exact words not available' and why")
 

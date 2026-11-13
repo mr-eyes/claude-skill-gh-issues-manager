@@ -52,6 +52,8 @@ The issues whose bodies make up each section, sections in the order of the {{del
 | `hub` | This issue |
 | `final-record` | Topic issue: the body is current deliverable text, the comments are its history |
 | `active` | Work in development; names its destination topic; carries no section labels |
+| `triage` | Opened by hand; not yet placed in the record |
+| `type:` labels | What an issue opened by hand is |
 | `needs-decision` | Waiting for a decision from the owner |
 | {{section labels}} | {{the deliverable section whose text the issue body is}} |
 | {{topic labels}} | {{topic}} |
