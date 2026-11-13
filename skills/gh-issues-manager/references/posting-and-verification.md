@@ -35,7 +35,8 @@ python3 scripts/lint_drafts.py --kind result --repo owner/name --online draft.md
 | Mermaid: `#`, parentheses, unquoted labels, nodes undefined or unused | error |
 | Resume comment: heading with timestamp, markers, all six fields, block length; resume markers inside a hub body | error |
 | Final record: title line, at least one section, every section filled, "Sources" last | error |
-| Final record: an "As of" line, a `<details>` block, a heading for decisions, open work, provenance or next steps, a dated heading | error |
+| Final record: an "As of" line with a date, month or year, a date and time in the text, a `<details>` block, a heading for decisions, open work, provenance or next steps, a dated heading outside "Sources" | error |
+| Final record: a line that looks like a section heading but is not one (`### Results`, `##Results`, indented, underlined, inside a code block) | error |
 | Final record: a `## ` heading that is not a section heading of the project's profiles, or that two profiles share and the labels do not settle | error |
 | Final record: section labels that disagree with the headings (`--labels`, or the labels in a manifest) | error |
 | Secrets (common token formats) and the project's `restricted_patterns` | error |
@@ -49,7 +50,7 @@ The linter does not judge content. It cannot know whether a number is right.
 |---|---|
 | Several new issues and comments | `create_issues.py --manifest <file>` |
 | One comment | `post_verified.py comment --issue N --kind <kind> --body-file <draft>` |
-| Replace an issue body | `post_verified.py body --issue N --kind <kind> --body-file <draft> --backup <file>`; for a final record it also moves the section labels to follow the headings |
+| Replace an issue body | `post_verified.py body --issue N --kind <kind> --body-file <draft> --backup <file>`; for a final record it also moves the section labels to follow the headings, and removes one only with `--allow-label-removal` |
 | Convert a record body of an older form, keeping it as a comment | `convert_body.py --issue N --body-file <draft> --expected <saved live body> --note "<when and why>"` |
 | A new resume comment on the hub | `resume_block.py update --file <draft>` |
 

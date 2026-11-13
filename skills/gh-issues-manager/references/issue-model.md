@@ -59,7 +59,7 @@ What the text may and may not hold:
 | A limitation stated as a property of the final method or result | The story of a failed attempt |
 | Sub-headings (`###`) inside a section | Open work, next steps, provenance, links to older trackers, job identifiers |
 
-The linter enforces what it can see: no "As of" line, no `<details>` block, no heading for decisions, open work, provenance or next steps, no dated heading, "Sources" last, and section headings that agree with the issue's labels.
+The linter enforces what it can see: no "As of" line followed by a date, month or year, no date and time in the text, no `<details>` block, no heading for decisions, open work, provenance, next steps or the other sections of the older record form, no dated heading outside "Sources", "Sources" last, no line that looks like a section heading but is not one, and section headings that agree with the issue's labels. It cannot see a job identifier, a missing denominator or a commit outside "Sources"; review catches those.
 
 In a project whose profiles define no section labels, the body is still the current text of the topic and nothing else, under plain `## ` headings of your choice, followed by "Sources".
 
@@ -88,11 +88,11 @@ Comments are append-only. They are the history: results, decisions with the deci
 The body always says what the deliverable says now. When that changes:
 
 1. Edit the body in place. The new text replaces the old; nothing old is folded or kept below it.
-2. A result that leaves the deliverable is deleted from the body. When a section has no text left, delete its heading; its section label comes off. When the whole topic leaves the deliverable, all its section labels come off and its rows leave the hub.
+2. A result that leaves the deliverable is deleted from the body. When a section has no text left, delete its heading; its section label comes off. When a whole topic leaves the deliverable, replace its body with one line saying that the topic is not part of the deliverable and why, pointing to the dated comment that records the reason (`post_verified.py body --issue N --kind generic --body-file <line> --backup <file>`, since a final record needs a section), remove its section labels and `final-record` with `gh issue edit N --remove-label <label>`, remove its rows from the hub, and close it as not planned (`gh issue close N --reason "not planned"`), or label it `active` if work on it continues.
 3. Post the result, decision or correction comment that caused the change. The comment explains why; the body shows what is true now. GitHub keeps every earlier version of the body in the issue's edit history.
 4. Update the hub only if the list of issues per section changed.
 
-`post_verified.py body --kind final-record` replaces the body and moves the section labels to follow the headings in one run.
+`post_verified.py body --kind final-record` replaces the body and moves the section labels to follow the headings in one run. It refuses an issue labeled `hub` or `active` or without `final-record`, and an issue that carries section labels of profiles not in use (pass `--profile`, or `--allow-other-profiles` to leave those labels alone). It removes a section label only with `--allow-label-removal`, after printing `removes: <labels>`: a heading mistyped as `### Results` or `##Results` would otherwise drop a section silently, and the linter reports such near-headings as errors. When no profile defines section labels it changes no label and says so.
 
 ## Active tasks
 

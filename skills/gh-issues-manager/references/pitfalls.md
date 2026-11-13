@@ -28,7 +28,7 @@ A broken diagram shows as a red error box in place of the map, and the preview i
 
 | Fact | Consequence |
 |---|---|
-| An issue or comment body holds at most 65,536 characters | Split a long record into a body plus continuation comments; the linter warns within 5,000 characters of the limit |
+| An issue or comment body holds at most 65,536 characters | A final record that needs more is split into two topics, a long comment into two comments; the linter warns within 5,000 characters of the limit |
 | The API and `gh` report times in UTC | Convert to the tracker's convention before writing; a merge at 01:30 UTC is the previous day in the Americas |
 | Stored bodies may come back with different line endings | Read-back comparison ignores line-ending style and trailing whitespace only |
 | Up to three issues can be pinned per repository | One hub per repository |
@@ -56,6 +56,8 @@ A broken diagram shows as a red error box in place of the map, and the preview i
 | A long record shortened into deliverable text loses its limitations, because they read like history | Every limitation of the final method or result stays, as a property of the result; the reviewer audits exclusions hardest | Independent review per batch |
 | The same quantity, or the same term, differs between bodies written at different times | One consistency pass over all bodies together before assembly and after a batch of conversions | Review |
 | A section label stays after its text left the body, and the assembler finds an empty or missing section | Labels follow the `## ` headings | Linter: headings against labels; `post_verified.py body` and `convert_body.py` set the labels from the headings |
+| A heading mistyped as `### Results`, `##Results`, indented, underlined or caught in an unclosed code block reads as a section that left, and its label is removed | A line that looks like a section heading but is not one is an error; a run that would remove a section label prints `removes:` and needs `--allow-label-removal` | Linter: `near-heading`; both scripts |
+| A deliverable body written into a task, the hub or an issue of another profile | Only an issue labeled `final-record`, and not `hub` or `active`, gets a deliverable body; section labels of profiles not in use stop the run | `post_verified.py body`, `convert_body.py` |
 | A body converted while someone else was editing it loses their edit | Draft from a saved copy of the live body; stop if the live body differs | `convert_body.py --expected` |
 
 ## Decisions and people

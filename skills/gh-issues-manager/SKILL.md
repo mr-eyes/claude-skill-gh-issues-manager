@@ -76,9 +76,9 @@ Do this when an experiment finishes, a decision is made, something fails or a ch
 ### Change the deliverable text
 
 1. Fetch the topic body to a file and edit it in place: the new text replaces the old, with no folded block, date or note of what changed. Text that leaves the deliverable is deleted, and a section with no text left is deleted with its heading.
-2. `python3 ${CLAUDE_SKILL_DIR}/scripts/post_verified.py body --issue N --kind final-record --body-file <draft> --backup <file>`. It lints, replaces the body, adds and removes section labels so they follow the headings, and reads both back.
+2. `python3 ${CLAUDE_SKILL_DIR}/scripts/post_verified.py body --issue N --kind final-record --body-file <draft> --backup <file> --dry-run` first, then without `--dry-run`. It refuses an issue labeled `hub` or `active`, or one without `final-record`; it lints, replaces the body, adds and removes section labels so they follow the headings, and reads both back. It prints `removes: <labels>` and removes a section label only with `--allow-label-removal`, so check that each of those sections left on purpose.
 3. Make sure the dated comment that motivated the change is posted. That comment and GitHub's edit history are the trail.
-4. Update the hub only when the list of issues per section changes (same command with `--kind hub`). When a whole topic leaves the deliverable, remove all its section labels with `gh issue edit N --remove-label <label>` and its rows on the hub.
+4. Update the hub only when the list of issues per section changes (same command with `--kind hub`). When a whole topic leaves the deliverable, replace its body with one line saying that the topic is not part of the deliverable and why, pointing to the dated comment that records the reason (`post_verified.py body --issue N --kind generic --body-file <line> --backup <file>`, since a final record needs a section), remove its section labels and `final-record` with `gh issue edit N --remove-label <label>`, remove its rows from the hub, and close it as not planned (`gh issue close N --reason "not planned"`), or label it `active` if work on it continues.
 5. Never edit a posted comment. Post a correction comment that links to the one it corrects.
 
 ### Bounded task
