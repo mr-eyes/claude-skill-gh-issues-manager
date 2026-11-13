@@ -4,6 +4,13 @@ A Claude Code skill that keeps a project's whole record in GitHub issues: what w
 
 It works for software development, research and development, scientific prototyping and manuscript preparation, alone or mixed.
 
+## What it does for you
+
+- **The record lifts the context limit.** The project's memory is its GitHub issues, not a conversation. Every session, every resumed or compacted session and every subagent starts with a short brief of where the record is and what is in play, printed by the plugin's hooks from a local index of the issues, and the rules for writing to it. Nothing important lives only in a chat.
+- **The finished work compiles from the issues.** Topic bodies hold the deliverable's current text, section by section; comments hold the dated, typed history. `compile.py` writes the deliverable in the hub's order, the figure, table and source lists, and a complete dated timeline of everything that happened, tagged by the issues' labels.
+
+Setup is a short set of questions; issues people open by hand are flagged for triage; a project that installs the plugin after months of work can catch up.
+
 ## What it sets up
 
 | Piece | What it is |
@@ -70,13 +77,15 @@ Use `<project>/.claude/skills/` in place of `~/.claude/skills/` to install it fo
 
 ### A new project
 
-Open Claude Code in the project and say something like "set up the issue tracker for this project with gh-issues-manager". Claude will:
+In a project without a record, the first session prints one line saying the plugin is installed and the project has no record yet. Say something like "set up the record for this project". Claude will:
 
-1. Ask for the repository, the kind of project, the sections of the deliverable, the first topics, the time zone to write times in, and whether any data is restricted.
-2. Write `.gh-issues-manager.json` at the project root.
-3. Create the labels (`setup_labels.py`, dry run first).
-4. Draft the hub, the first resume comment and one topic body per topic from the templates, lint them, and create them with `create_issues.py`, which fills in the issue numbers, pins the hub, posts the comments and reads every body and comment back to confirm it.
-5. Offer the CLAUDE.md snippet and the hook.
+1. Look at the project's file names (`setup.py detect`) only to pre-select answers, then ask a few questions with multiple-choice answers: what the project will produce (paper, thesis, software, dataset, report, prototype, proposal, documentation, other), the sections of each, where the record lives, who decides, the time zone, whether there is earlier work to catch up on, and the optional parts.
+2. Show a summary for your confirmation; nothing is written before it.
+3. Apply it (`setup.py apply`, dry run first): the configuration, the labels, the hub with its first resume comment, your trusted-list entry if you agree, the optional triage workflow and CLAUDE.md snippet, and the first sync of the local index.
+
+### A project with months of work behind it
+
+Say "catch up the record". Claude takes a read-only inventory of what exists (`catchup.py inventory`: history, issues, pull requests, documents, result folders, and, only if you agree, this project's local Claude Code transcripts), proposes a topic map for your approval, drafts the bodies with the plugin's agents, and posts past events as reconstructed comments with their original dates and sources.
 
 ### A project with an older tracker
 
@@ -106,6 +115,10 @@ Compaction replaces a long conversation with a summary. Summaries drop detail an
 | The rules themselves | The skill, and optionally the project's CLAUDE.md | Loaded by Claude Code |
 
 The resume block is small on purpose (under 4,000 characters) and a new one is posted at the end of every working stretch, so the first thing a blank session reads is short, current and written for exactly that reader. Posting it as a comment, never as an edit, also keeps a history of where the project stood at each stop.
+
+## The agents
+
+The plugin adds three agents for bulk and audit work, one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts topic bodies in batches to files only; `record-reviewer` reviews drafts read-only, per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals. Each preloads the skill and uses your default model; to choose another, copy its file into the project's `.claude/agents/` and set `model:`.
 
 ## The hooks and the CLAUDE.md snippet
 
@@ -137,6 +150,8 @@ All are in `skills/gh-issues-manager/scripts/`, use only the Python standard lib
 | `snapshot.py` | Saves all issues, pull requests and comments as local Markdown with an index, for offline reading and for surveying an old tracker | no |
 | `index.py` | Keeps the local index of the record: `sync` reads what changed on GitHub; `query` answers consistency, impact, timeline, triage and brief questions without network | no |
 | `hooks.py`, `run_hook.sh`, `session_start_hook.sh` | The four hooks; `hooks.py --print` shows their payloads | no |
+| `setup.py` | `detect` suggests deliverables from file names; `apply` makes the setup from answers you confirmed | `apply` |
+| `catchup.py` | Lists earlier work and work done since the newest recorded event; drafts reconstructed event comments | no |
 | `compile.py` | Writes the deliverable section by section in the hub's order, the figure, table and source lists, the full dated timeline of the project and a manifest | no |
 
 Every script that writes has `--dry-run`, which prints the exact `gh` commands and changes nothing.
@@ -222,6 +237,7 @@ To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json
 ```text
 .claude-plugin/           plugin.json and marketplace.json
 hooks/hooks.json          hook registration for the plugin (four events)
+agents/                   record-drafter, record-reviewer, record-auditor
 skills/gh-issues-manager/
   SKILL.md                the skill
   references/             detail loaded on demand

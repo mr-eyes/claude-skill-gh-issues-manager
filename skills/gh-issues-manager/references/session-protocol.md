@@ -24,6 +24,10 @@ If the owner gives an instruction that conflicts with the resume block's holds, 
 - When the owner decides something in chat, copy their words into a draft decision comment right away, while the exact text is still in context.
 - Before starting a command or job that will outlive the session's attention, post a checkpoint saying what was started, where its output goes and how to tell that it finished.
 
+## The audit
+
+At the end of a work stretch, before a release and before compiling, run the `record-auditor` agent. It is read-only and returns a list for the main session to act on: commits, merged pull requests and finished work with no event comment (`catchup.py gap`); bodies older than their newest relevant event; hub lists out of date; section labels that disagree with headings; `active` issues with no activity; issues that need triage; and new deliverable signals the setup does not cover, to be put to the user once as a question.
+
 ## End of a working stretch
 
 Do this before stopping, before handing over, and when the context is close to full:

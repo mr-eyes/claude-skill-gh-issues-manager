@@ -1,6 +1,6 @@
 ---
 name: gh-issues-manager
-description: Keeps a project's record in GitHub issues - one pinned hub issue, one topic issue per part of the deliverable whose body is the deliverable's current text for that part, and dated comments for results, decisions and failures. Use in a project that has a .gh-issues-manager.json file or a pinned hub issue, when recording a result, decision, failure or merged change, when resuming a session or recovering after context compaction, when updating the hub or posting a resume block, and when preparing a paper, release or report from the record. Also use when the user asks to set up such a record for a project or to migrate an older issue tracker into one.
+description: Keeps a project's record in GitHub issues - one pinned hub issue, one topic issue per part of the deliverable whose body is the deliverable's current text for that part, and dated comments for results, decisions and failures. Use in a project that has a .gh-issues-manager.json file or a pinned hub issue, when recording a result, decision, failure or merged change, when resuming a session or recovering after context compaction, when triaging an issue someone opened by hand, when posting a resume block, and when compiling a paper, release or report from the record. Also use when the user asks to set up such a record (a short wizard of questions), to catch up a project that already has months of work, or to migrate an older issue tracker.
 ---
 
 # GitHub issues as the project record
@@ -54,7 +54,11 @@ Full model: [references/issue-model.md](references/issue-model.md). Label sets, 
 
 ## Workflows
 
-### Bootstrap a new project
+### Set up a record (the wizard)
+
+Run `python3 ${CLAUDE_SKILL_DIR}/scripts/setup.py detect` (read-only), then ask the setup questions with the multiple-choice question tool, a few at a time, with detection's suggestions pre-selected and their evidence shown. Show a summary and get one final confirmation; nothing is written before it. Write the answers to a file and run `setup.py apply --answers <file> --dry-run`, then `--yes`: it writes the configuration, creates the labels, the hub and its first resume comment, adds the trusted entry if the user agreed, writes the optional triage workflow and CLAUDE.md snippet, and builds the local index in the foreground. Questions, answers file and later changes: [references/setup.md](references/setup.md).
+
+### Bootstrap by hand
 
 1. Agree with the owner on the repository, the profiles, the deliverable sections, the first topics, the time convention and the restricted-data rule. Write `.gh-issues-manager.json`.
 2. `python3 ${CLAUDE_SKILL_DIR}/scripts/setup_labels.py --dry-run`, then without `--dry-run`.
@@ -95,6 +99,18 @@ Before stopping, before a long-running command, and whenever the context is gett
 
 Work from the hub's deliverable-section tables, section by section. For each listed issue take the text under that section's heading in its body, and nothing else: bodies are the text, comments are history. Check first that every body reflects its newest comments, and that the same quantity has the same value, denominator and source in every body. `python3 ${CLAUDE_SKILL_DIR}/scripts/compile.py --out <folder>` assembles the sections in the hub's order, the figure, table and source lists, and the full dated timeline. See [references/deliverables.md](references/deliverables.md).
 
+### Triage an issue opened by hand
+
+For each issue the brief or `index.py query triage` lists: read it, choose one `type:` label and a route, post a triage comment from [templates/comment-triage.md](templates/comment-triage.md) (kind `triage`) that quotes the person who opened it exactly, then apply the type label and remove `triage`. Labeling and commenting need no confirmation; closing an issue, changing the project's scope and editing a deliverable body each need the user's yes first. Types, routes and the optional labeler workflow: [references/triage.md](references/triage.md).
+
+### Catch up on earlier work
+
+When the plugin arrives in a project with months of work, or after a stretch without the record: `catchup.py inventory` (read-only; local transcripts only with `--transcripts` and the user's agreement), a topic map the user approves, bodies drafted and reviewed as in a migration, and past events posted as reconstructed event comments with their original dates and sources (`catchup.py event`). `catchup.py gap` lists work done since the newest recorded event. See [references/catch-up.md](references/catch-up.md).
+
+### Bulk work with the agents
+
+The plugin's agents work one tier below the main session, which stays the only writer to GitHub: `record-drafter` drafts bodies in batches of about four issues to files only; `record-reviewer` reviews drafts read-only, per batch and across all bodies; `record-auditor` checks the record for drift, untriaged issues and new deliverable signals at the end of a stretch, before a release or before compiling. Batch workflow: [references/migration.md](references/migration.md); audit: [references/session-protocol.md](references/session-protocol.md).
+
 ### Migrate an older tracker
 
 Snapshot the old tracker, map every old issue and pull request to a new topic, copy content into new issues (deliverable text in the bodies, history in comments), and post at most short pointer comments in the old tracker. Never edit or delete old issues. To convert record bodies of an older form into deliverable text in the same repository, draft each from the full record, list what moved out and why, review, check consistency across all bodies, then run `scripts/convert_body.py`, which keeps the former body as a comment. See [references/migration.md](references/migration.md).
@@ -130,6 +146,8 @@ Why each rule exists, with the Mermaid and GitHub limits: [references/pitfalls.m
 | `snapshot.py` | Save all issues and comments as local Markdown with an index | no |
 | `index.py` | Local SQLite index of the record: `sync` from GitHub; `query` consistency, impact, timeline, triage, brief | no (reads) |
 | `hooks.py`, `run_hook.sh` | The four hooks: SessionStart, SubagentStart, UserPromptSubmit, PreCompact; `hooks.py --print` shows the payloads | no |
+| `setup.py` | `detect` suggests deliverables from file names (read-only); `apply` makes the setup from confirmed answers | `apply` only, `--dry-run` available |
+| `catchup.py` | `inventory` and `gap` list earlier work (read-only); `event` drafts a reconstructed event comment | no |
 | `compile.py` | The deliverable by section, figure, table and source lists, the dated timeline and a manifest, from the record | no (reads) |
 | `session_start_hook.sh` | SessionStart hook; calls `run_hook.sh session-start` | no |
 

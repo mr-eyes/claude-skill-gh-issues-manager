@@ -80,6 +80,7 @@ An event is something that happened and will matter later. Each one becomes a da
 | Failure | A run, approach or change failed | `templates/comment-failure.md` |
 | Checkpoint | A working stretch ends with work in flight | `templates/comment-checkpoint.md` |
 | Correction | A posted statement or number was wrong | `templates/comment-correction.md` |
+| Triage | An issue opened by hand was given a type and a route | `templates/comment-triage.md` |
 
 Every event comment starts with a machine-readable marker line, then its heading:
 
@@ -118,7 +119,8 @@ A task that ends with nothing to report still gets a result: "no change, because
 
 | Group | Labels | Use |
 |---|---|---|
-| Role | `hub`, `final-record`, `active`, `needs-decision`, `migrated` | What kind of issue this is |
+| Role | `hub`, `final-record`, `active`, `triage`, `needs-decision`, `migrated` | What kind of issue this is; `triage` marks an issue opened by hand that is not yet placed |
+| Type | `type:task`, `type:bug`, `type:question`, `type:docs`, `type:idea`, `type:data`, `type:decision-needed`, `type:duplicate`, `type:out-of-scope`, plus the profile's own | What an issue opened by hand is (see [triage.md](triage.md)) |
 | Deliverable section | From the profile, for example `ms:methods` or `rel:fixed` | Which part of the deliverable the issue's body is the text of; follows the body's `## ` headings |
 | Topic | `topic:<name>` | Which topic the issue or pull request belongs to |
 

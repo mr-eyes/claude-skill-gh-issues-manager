@@ -72,6 +72,19 @@ Draft each from `templates/pointer-comment.md`. In a comment posted to another r
 - A reader given only the new hub can answer: what does each section of the deliverable say, where does each number come from (the body's "Sources"), what was decided and by whom (the decision comments).
 - Take a snapshot of the new tracker and search it for the old repository's bare issue numbers.
 
+## The batch workflow with the agents
+
+Bulk drafting and review use the plugin's agents; the main session stays the only writer to GitHub.
+
+1. Draft: the `record-drafter` agent takes a batch of about four issues and writes draft bodies to files only, with a notes file per batch listing what it moved out of each body and why, conflicts between sources, and owner questions.
+2. Review: the `record-reviewer` agent, which has not seen the drafter's reasoning, audits the batch read-only: dropped limitations first, then statements firmer than their source, numbers and denominators, the rules of the body and the source paths. It returns findings with exact replacement text.
+3. Fix: the main session applies the findings to the drafts, or records why it does not.
+4. Cross-issue review: when all batches are drafted, `record-reviewer` in its cross-issue mode checks all bodies together for shared numbers, terms, `#N` pointers and contradictions.
+5. Post: the main session posts each body with `convert_body.py` or `post_verified.py body`, with read-back.
+6. Owner questions: collected, without duplicates, in one `active` issue, the decision list.
+
+None of the agents starts another agent. Each preloads this skill and uses the user's default model; to give an agent another model, copy its file from the plugin's `agents/` folder into the project's `.claude/agents/` and set `model:` in its frontmatter.
+
 ## Converting record bodies into deliverable text
 
 A tracker whose topic bodies hold a full record (a dated "Current state", folded "Replaced on" blocks, decisions, open work, provenance) is converted in place, issue by issue, so that each body becomes the text for its sections of the deliverable. Nothing is lost: the former body is kept, unchanged, as a comment on the same issue.

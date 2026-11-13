@@ -70,6 +70,30 @@ Topics are analyses, figures, tables or claims. Events: a result that enters a f
 
 Emphasis: each body is manuscript text, ready to paste. Each figure and table has a topic whose "Sources" names the script, commit and input files that produce it, and each number in the text has its source there. Reviewer comments are quoted word for word in comments, like decisions.
 
+## Thesis (`thesis`), dataset (`dataset`), proposal (`proposal`), documentation (`docs`)
+
+| Profile | Deliverable | Section labels and body headings |
+|---|---|---|
+| `thesis` | A thesis or a report made of chapters | `th:introduction` Introduction, `th:background` Background, `th:methods` Methods, `th:results` Results, `th:discussion` Discussion, `th:appendix` Appendix |
+| `dataset` | A dataset or resource with its documentation | `ds:description` Description, `ds:collection` Collection, `ds:processing` Processing, `ds:quality` Quality, `ds:access` Access |
+| `proposal` | A grant or project proposal | `gp:aims` Aims, `gp:significance` Significance, `gp:approach` Approach, `gp:timeline` Timeline, `gp:resources` Resources |
+| `docs` | Documentation or a website | `doc:overview` Overview, `doc:guides` Guides, `doc:reference` Reference, `doc:questions` Questions and answers |
+| `custom` | A deliverable with sections the user names at setup | prefix `sec:` |
+
+## Issue types
+
+Every project has the core `type:` labels of the `core` profile (task, bug, question, docs, idea, data, decision needed, duplicate, out of scope). Profiles add their own: `type:reviewer-comment` (manuscript, proposal), `type:release` (software), `type:analysis` (research), `type:experiment` (prototyping), `type:supervisor-comment` (thesis), `type:data-request` (dataset), `type:docs-request` (docs). See [triage.md](triage.md).
+
+## Sections chosen at setup
+
+The sections of a deliverable can be renamed, added and reordered at setup ([setup.md](setup.md)). The project's configuration then holds the profile as an entry with its sections instead of its name:
+
+```json
+"profiles": ["software", {"name": "manuscript", "sections": [["ms:background", "Background"], ["ms:methods", "Methods"], ["ms:results", "Results"], ["ms:data-availability", "Data availability"]]}]
+```
+
+Each label carries the profile's prefix and a plain name; each heading has a plain form; at most twenty sections. An entry that does not pass these checks is not used, so a project file cannot name role, topic or type labels or carry other text into the brief.
+
 ## Mixed projects
 
 A method paper with a software package uses `manuscript` and `software`; an exploratory project that may become a paper starts with `research` and adds `manuscript` when writing begins. An issue may carry section labels from more than one profile; its body then has a section for each. The hub has one deliverable table per deliverable.

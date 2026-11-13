@@ -12,6 +12,8 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 | `comment-failure.md` | `failure` | A failed run, approach or change |
 | `comment-checkpoint.md` | `checkpoint` | State of work in flight at the end of a stretch |
 | `comment-correction.md` | `correction` | A posted statement or number was wrong |
+| `comment-triage.md` | `triage` | An issue opened by hand: its type, route and what waits for confirmation |
+| `ghim-triage.yml` | | The optional GitHub Actions workflow that labels issues opened without a role label |
 | `resume-block.md` | `resume` | A resume comment on the hub: heading, markers and the block |
 | `pointer-comment.md` | `pointer` | The short note left in an older tracker |
 | `migration-map.md` | `generic` | The survey table of a migration |

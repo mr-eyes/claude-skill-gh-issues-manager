@@ -1,4 +1,6 @@
-# Bootstrapping a new project
+# Bootstrapping a new project by hand
+
+The usual way to set up a record is the wizard in [setup.md](setup.md), which asks the questions below and makes every change with `setup.py apply`. This page is the same setup done step by step.
 
 > Commands on this page write `scripts/<name>` for short. That is the `scripts` folder of this skill, next to `SKILL.md`; call it by its full path.
 
