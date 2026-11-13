@@ -87,8 +87,8 @@ def digest(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-class OutOfTime(Exception):
-    pass
+class OutOfTime(BaseException):
+    """Raised by the alarm; a BaseException so that no `except Exception` inside the sync swallows it."""
 
 
 @contextlib.contextmanager
@@ -140,7 +140,8 @@ def run(event, data, budget):
     except Unavailable as error:
         reason = str(error)
     except storage.StorageError as error:
-        reason = "the local storage was refused (%s)" % error
+        reason = "the local storage was refused (%s)" % STORAGE_REASONS.get(getattr(error, "kind", ""),
+                                                                            "a storage folder or file is not safe to use")
     except Exception as error:  # noqa: BLE001 - a hook never fails a session
         reason = "an unexpected %s" % type(error).__name__
     line = NOT_SHOWN % reason
@@ -153,18 +154,32 @@ def run(event, data, budget):
 
 BUILDING = ("gh-issues-manager: record brief not shown: building the local index in the background (first run); "
             "the brief appears at your next prompt. Run hooks.py --doctor for status.")
+REBUILDING = ("gh-issues-manager: record brief not shown: the local index was refused (often a key that differs between "
+              "environments, such as a terminal and a hook with another XDG_STATE_HOME or HOME); it is moved aside and "
+              "rebuilt in the background, and the brief appears at your next prompt. Run hooks.py --doctor for status.")
+# Fixed sentences for the notice: the error messages themselves hold paths from the environment and stay in --doctor.
+STORAGE_REASONS = {
+    "symlink": "a storage folder or file is a symlink",
+    "owner": "a storage folder or file belongs to another user",
+    "permissions": "a storage folder or file has permissions for group or others",
+    "parent": "the storage folder is in a folder that others can write to",
+    "not-folder": "a storage path is not the kind of file expected",
+    "key": "the plugin's key is empty or damaged",
+    "changed": "the index changed while it was being opened",
+    "name": "the repository name cannot be used as a folder name",
+}
 
 
 def open_usable(repo):
-    """The index when it can be used for a brief, else None. Raises storage.StorageError for unsafe storage."""
+    """(index or None, refused). Raises storage.StorageError for unsafe storage."""
     try:
         db = index.connect(repo, create=False)
     except index.RefusedIndex:
-        return None  # a sync moves it aside and builds a new one
+        return None, True  # a sync moves it aside and builds a new one
     if db is not None and not index.get_meta(db, "synced_at"):
         db.close()
-        return None
-    return db
+        return None, False
+    return db, False
 
 
 def start_background(repo, config):
@@ -193,27 +208,32 @@ def start_background(repo, config):
 
 def produce(event, data, budget, config, repo, hub):
     session = str(data.get("session_id") or "")
-    db = open_usable(repo)
+    db, refused = open_usable(repo)
     fresh, failure = None, ""
     if event == "session-start":
         if db is None:
+            building = index.running(repo)  # a file being written by a running build is not a refused index
             start_background(repo, config)
             remember(repo, session, None, brief=False)
-            return BUILDING
+            return REBUILDING if refused and not building else BUILDING
         db.close()
         if index.running(repo):
             fresh = None  # a background sync is writing the index; use it as it is
         else:
             share = max(1.0, budget / 2.0)  # the sync gets half the budget; the rest is for the brief
             try:
-                with alarm(share + 0.5):
+                with alarm(share + max(1.0, budget / 4.0)):  # a safety net; the sync stops itself at `share`
                     summary = index.sync(repo, hub, timeout=share, deadline=share, timeline_cap=10, log=lambda *a: None)
                 fresh = True
                 if not summary["complete"]:
+                    fresh = False  # part was read; say it is not fully refreshed
+                    failure = "GitHub could not be read (timed out)"
                     start_background(repo, config)  # a large backlog catches up without blocking sessions
             except storage.StorageError:
                 raise
-            except Exception as error:  # noqa: BLE001 - the cached index is used
+            except index.SyncBusy:
+                fresh = None  # another sync holds the lock; use the index as it is
+            except (Exception, OutOfTime) as error:  # noqa: BLE001 - the cached index is used
                 fresh = False
                 slow = isinstance(error, OutOfTime) or "timed out" in str(error) or "deadline" in str(error)
                 failure = "GitHub could not be read (%s)" % ("timed out" if slow else "gh failed"
@@ -221,11 +241,12 @@ def produce(event, data, budget, config, repo, hub):
                                                              type(error).__name__)
                 if slow:
                     start_background(repo, config)
-        db = open_usable(repo)
+        db, refused = open_usable(repo)
         if db is None:
+            building = index.running(repo)
             start_background(repo, config)
             remember(repo, session, None, brief=False)
-            return BUILDING
+            return REBUILDING if refused and not building else BUILDING
     elif db is None:
         if event == "subagent-start" and index.running(repo):
             return json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": BUILDING}})

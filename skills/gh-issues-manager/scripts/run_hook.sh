@@ -13,9 +13,18 @@ command -v python3 >/dev/null 2>&1 || exit 0
 cd "${CLAUDE_PROJECT_DIR:-$PWD}" 2>/dev/null || exit 0
 limit="${GHIM_HOOK_TIMEOUT:-10}"   # seconds the Python side plans for: half for the sync, the rest for the brief
 case "$limit" in ''|*[!0-9]*) limit=10;; esac   # digits only; never evaluated as an expression
-case "$limit" in ?????*) limit=10;; esac        # and not absurdly long
+case "$limit" in ????*) limit=10;; esac         # and short
+limit=$((10#$limit))                            # base 10, so 08 and 09 are numbers
+[ "$limit" -ge 1 ] || limit=10
+[ "$limit" -le 15 ] || limit=15
 export GHIM_HOOK_TIMEOUT="$limit"
-hard=$((limit + 3))                # safety net, below the hook's own timeout in hooks.json
+# The safety net stays below each hook's timeout in hooks.json (SessionStart 20, SubagentStart 10,
+# UserPromptSubmit 5, PreCompact 10). The background sync is detached and has its own deadline.
+case "$event" in
+  session-start) hard=$((limit + 3)) ;;
+  prompt-submit) hard=4 ;;
+  *) hard=8 ;;
+esac
 
 if command -v timeout >/dev/null 2>&1; then
   timeout "$hard" python3 "$here/hooks.py" "$event" 2>/dev/null
