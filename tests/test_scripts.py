@@ -2805,6 +2805,13 @@ class SetupTests(Sandbox):
                 self.assertTrue(item["evidence"], item)
         text = self.setup_script("detect", "--root", self.project(["pyproject.toml", "tests/"])).stdout
         self.assertIn("suggested: software (profile software), because pyproject.toml, tests/", text)
+        sys.path.insert(0, SCRIPTS)
+        import setup
+        paper = self.project(["manuscript/main.tex", ".github/workflows/ghim-triage.yml"])
+        self.assertEqual([], setup.uncovered_signals(paper, {"profiles": ["manuscript"]}))  # covered
+        self.assertEqual(["paper"], [s["kind"] for s in setup.uncovered_signals(paper, {"profiles": ["software"]})])
+        malformed = {"profiles": [{"sections": []}]}
+        self.assertEqual(["paper"], [s["kind"] for s in setup.uncovered_signals(paper, malformed)])
         self.assertIn("no suggestion", self.setup_script("detect", "--root", self.project()).stdout)
 
     def test_apply_dry_run_for_three_setups_writes_nothing(self):
