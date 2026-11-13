@@ -32,10 +32,15 @@ import ghim  # noqa: E402
 FINAL_RECORD_SECTIONS = ["## " + ghim.SOURCES_HEADING]
 
 # Headings that carry history or planning, which belong in comments and active issues.
+# The whole heading must match, so "Next-generation sequencing" or "Provenance tracking" stay allowed.
 HISTORY_HEADING = re.compile(
-    r"^(?:decisions|decision (?:record|log|table)|open (?:work|questions|items)|provenance"
-    r"|next(?: (?:steps?|actions?|work))?|current state)(?![\w-])", re.I)
+    r"^(?:decisions?|decision (?:record|log|table)|open (?:work|questions|items)|provenance"
+    r"|next(?: (?:steps?|actions?|work))?|current state|not established|code and evidence|related topics"
+    r"|history|status)\s*$", re.I)
 DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# "As of" followed by a date, a month or a year, at the start of a line or of a list item.
+AS_OF = re.compile(r"^\s*(?:(?:[-*+]|\d+\.)\s+)?[*_]*as of\s+[*_]*(?:\d{4}\b|\d{1,2}[/.]\d"
+                   r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)", re.I)
 
 RESUME_FIELDS = [
     "**Last updated:**",
@@ -308,29 +313,54 @@ def check_final_record(text, template, labels, profiles, add):
     if not re.match(r"^# \S", first[1]):
         add("error", "title-line", first[0], "a final record starts with a title line: '# <topic as the deliverable names it>'")
 
+    sections = ghim.body_sections(text)
+    source = ghim.SOURCES_HEADING
+    sources_at = next((n for n, title in sections if title.lower() == source.lower()), None)
     for number, line in rows:
         line = strip_inline_code(line)
-        if re.match(r"^[\s>*_]*as of\b", line, re.I):
+        in_sources = sources_at is not None and number >= sources_at
+        if AS_OF.match(line):
             add("error", "as-of", number,
                 "no 'As of' line: the body is the current text only; dates belong in the comments")
         if re.search(r"<details\b", line, re.I):
             add("error", "details-block", number,
                 "no <details> block: replaced text is not kept in the body; GitHub's edit history and the "
                 "dated comment that caused the change are the trail")
+        if not in_sources and re.search(STAMP, line):
+            add("error", "dated-text", number,
+                "a date and time in the text: the body holds the current text only; the time of a change "
+                "belongs in the comment that records it")
         heading = re.match(r"^#{1,6} +(.*?)\s*#*\s*$", line)
         if heading:
-            title = heading.group(1).strip().rstrip(":")
+            title = heading.group(1).strip().rstrip(":").strip()
             if HISTORY_HEADING.match(title):
                 add("error", "history-heading", number,
                     "heading '%s' holds history or planning: decisions go in decision comments, open work and "
                     "next steps in active issues, provenance in comments or Sources" % title)
-            if DATE.search(title):
+            if DATE.search(title) and not in_sources:
                 add("error", "dated-heading", number,
                     "dated heading '%s': the body holds the current text only, without dates" % title)
 
-    sections = ghim.body_sections(text)
+    # A line that looks like a section heading but is not one would make its section, and its label, disappear.
+    try:
+        names = {heading.lower() for _, heading in ghim.section_labels(profiles)}
+    except ValueError:
+        names = set()  # reported below
+    names.add(source.lower())
+    for number, line, region in split_regions(text):
+        if number == first[0] or region == "fence" or (region == "prose" and re.match(r"^## +\S", line)):
+            continue
+        if region == "code" and not line.lstrip().startswith("#"):
+            continue
+        candidate = re.sub(r"[\s#:]*$", "", re.sub(r"^\s*#*\s*", "", line))
+        if candidate and candidate.lower() in names:
+            where = "inside a code block; close the block before it" if region == "code" else \
+                "write it as '## %s' at the start of a line, or reword the line" % candidate
+            add("error", "near-heading", number,
+                "'%s' looks like the section heading '## %s' but is not one, so the section and its label would "
+                "be lost; %s" % (line.strip(), candidate, where))
+
     names = [title for _, title in sections]
-    source = ghim.SOURCES_HEADING
     if not [title for title in names if title.lower() != source.lower()]:
         add("error", "no-sections", 0, "no '## ' section before '## %s'; write the text for at least one "
             "section of the deliverable" % source)
@@ -398,8 +428,8 @@ def lint_text(text, kind="generic", template=False, allow_placeholders=False,
     length = len(text)
     if length > ghim.BODY_LIMIT:
         add("error", "length", 0,
-            "%d characters; GitHub accepts at most %d. Split into a body plus continuation comments"
-            % (length, ghim.BODY_LIMIT))
+            "%d characters; GitHub accepts at most %d. Shorten it: a final record that needs more is split "
+            "into two topics, a comment into two comments" % (length, ghim.BODY_LIMIT))
     elif length > ghim.BODY_LIMIT - 5000:
         add("warning", "length", 0, "%d characters; close to the %d limit" % (length, ghim.BODY_LIMIT))
     if not text.strip():
