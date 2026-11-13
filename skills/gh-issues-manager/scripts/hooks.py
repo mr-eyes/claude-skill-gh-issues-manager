@@ -34,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 import index  # noqa: E402
 import brief  # noqa: E402
+import storage  # noqa: E402
 
 EVENTS = ("session-start", "subagent-start", "prompt-submit", "pre-compact")
 HOOK_NAMES = {"session-start": "SessionStart", "subagent-start": "SubagentStart",
@@ -50,24 +51,24 @@ def read_input():
 
 
 def state_path(repo):
-    return os.path.join(index.data_dir(repo), "prompt-state.json")
+    """The prompt-hook state file, in a checked folder outside the project tree (see storage.py)."""
+    folder = storage.secure_folder(storage.state_root(), storage.repo_folder(repo))
+    return os.path.join(folder, "prompt-state.json")
 
 
 def load_state(repo):
+    """Raises storage.StorageError when the state file is a symlink or not safe; unreadable JSON counts as empty."""
+    text = storage.read_file(state_path(repo))
     try:
-        with open(state_path(repo), encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except (OSError, ValueError):
+        data = json.loads(text) if text else {}
+    except ValueError:
         return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
 
 
 def save_state(repo, state):
     sessions = sorted(state.items(), key=lambda kv: kv[1].get("seen", 0))[-50:]  # keep the newest sessions only
-    path = state_path(repo)
-    with open(path + ".part", "w", encoding="utf-8") as handle:
-        json.dump(dict(sessions), handle)
-    os.replace(path + ".part", path)
+    storage.write_file(state_path(repo), json.dumps(dict(sessions)))
 
 
 def digest(text):
@@ -98,7 +99,7 @@ def run(event, data, budget):
             fresh = True
         except Exception:  # noqa: BLE001 - a hook never fails a session; the cached index is used
             fresh = False
-    db = index.connect(repo, create=False)
+    db = index.connect(repo, create=False)  # raises for an index that must not be read; the hook stays silent
     if db is None:
         return ""
     try:
@@ -143,7 +144,7 @@ def remember(repo, session, key, injected):
         entry["seen"] = entry.get("count", 0) + len(state)
         state[session] = entry
         save_state(repo, state)
-    except OSError:
+    except (OSError, storage.StorageError):
         pass
 
 
@@ -154,7 +155,10 @@ def print_all():
     if repo.lower() not in ghim.trusted_repos():
         print("note: %s is not in your trusted repositories (%s), so the hooks print nothing for it; the payloads "
               "below show what they would print once it is trusted." % (repo, ghim.trusted_file()))
-    db = index.connect(repo, create=False)
+    try:
+        db = index.connect(repo, create=False)
+    except storage.StorageError as error:
+        sys.exit("error: %s" % error)
     if db is None:
         sys.exit("error: no index for %s at %s; run index.py sync first" % (repo, index.index_path(repo)))
     total = 0

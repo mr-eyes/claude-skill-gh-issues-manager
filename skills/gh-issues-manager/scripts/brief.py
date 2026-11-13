@@ -9,6 +9,7 @@ resume_block.py: an issue title is shown only when its author is an allowed
 account and no other account renamed it.
 """
 
+import datetime
 import json
 import re
 
@@ -95,7 +96,7 @@ class Record:
         if fresh:
             return "read from GitHub just now"
         if fresh is False:
-            return "cached: GitHub could not be read just now; this comes from the local index synced %s (UTC), %s" % (
+            return "cached, not refreshed (index synced %s UTC, %s): GitHub could not be read just now" % (
                 self.synced or "never", index.age_text(self.synced))
         return "from the local index synced %s (UTC), %s" % (self.synced or "never", index.age_text(self.synced))
 
@@ -141,6 +142,13 @@ def session_payload(record, fresh):
             if len(untriaged) > 10 else ""))
     resume = index.get_meta(record.db, "resume") or ""
     note = index.get_meta(record.db, "resume_note") or "not read"
+    limit = record.config.get("resume_cache_days")
+    limit = limit if isinstance(limit, (int, float)) and limit >= 0 else 7
+    read_at = index.get_meta(record.db, "resume_read_at")
+    if resume and fresh is False and days_old(read_at) > limit:
+        note = ("left out: the cached copy was read %s, longer ago than the limit of %s days (resume_cache_days in "
+                ".gh-issues-manager.json); read the hub's newest resume comment" % (index.age_text(read_at), limit))
+        resume = ""
     lines += ["", "Resume block: %s." % defuse(note)]
     if index.get_meta(record.db, "resume_ignored"):
         lines.append(defuse(index.get_meta(record.db, "resume_ignored")))
@@ -153,6 +161,14 @@ def session_payload(record, fresh):
         "gh-issues-manager: follow the session protocol of the gh-issues-manager skill before acting: this brief, "
         "the open active issues, then the newest comments of the topics in play.")
     return cap(text, CAPS["session-start"])
+
+
+def days_old(stamp):
+    try:
+        then = datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except (TypeError, ValueError):
+        return float("inf")
+    return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds() / 86400
 
 
 def defuse_block(text):

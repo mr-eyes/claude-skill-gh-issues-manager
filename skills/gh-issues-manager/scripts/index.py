@@ -6,8 +6,11 @@ consistency checks read without asking GitHub again. It can be deleted or
 rebuilt with `sync --rebuild` whenever its content is in doubt.
 
 Where it lives: <CLAUDE_PLUGIN_DATA>/<owner>__<repo>/index.sqlite, or, when
-Claude Code has not set CLAUDE_PLUGIN_DATA, <project>/.tmp/gh-issues-manager/
-<owner>__<repo>/index.sqlite (keep .tmp/ out of version control).
+Claude Code has not set CLAUDE_PLUGIN_DATA, $XDG_CACHE_HOME/gh-issues-manager/
+<owner>__<repo>/index.sqlite (by default under ~/.cache). Never in the project
+tree. An index that is a symlink, is writable by others, belongs to another
+user or repository, or was not created by this plugin for this user is not
+read (see storage.py).
 
 sync     reads issues, comments, timeline events and body edits that changed
          since the last sync (by updated_at), and the hub's resume block when
@@ -45,6 +48,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 import record_format  # noqa: E402
+import storage  # noqa: E402
+
+FORMAT = "1"
+ISO_UTC = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+IDENTITY = ("repo", "format", "mark")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -79,26 +87,57 @@ ROLE_LABELS = {"hub", "final-record", "active", "triage"}
 CLOSED_OUT_TYPES = {"type:duplicate", "type:out-of-scope"}
 
 
-def data_dir(repo):
-    base = os.environ.get("CLAUDE_PLUGIN_DATA")
-    if not base:
-        base = os.path.join(ghim.project_root(), ".tmp", "gh-issues-manager")
-    return os.path.join(base, repo.replace("/", "__"))
+def index_dir(repo):
+    return os.path.join(storage.cache_root(), storage.repo_folder(repo))
 
 
 def index_path(repo):
-    return os.path.join(data_dir(repo), "index.sqlite")
+    return os.path.join(index_dir(repo), "index.sqlite")
 
 
 def connect(repo, create=True):
+    """Open the index of `repo`, or None when there is none and create is False.
+
+    Raises storage.StorageError for an index that must not be read: a symlink,
+    writable by others, owned by another user, of another repository or format,
+    or without the mark this plugin gives the index files it creates.
+    """
     path = index_path(repo)
-    if not create and not os.path.isfile(path):
+    if create:
+        storage.secure_folder(storage.cache_root(), storage.repo_folder(repo))
+    elif not (storage.check_path(storage.cache_root()) and storage.check_path(index_dir(repo))):
         return None
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    exists = storage.check_path(path, "file")
+    if not exists and not create:
+        return None
     db = sqlite3.connect(path, timeout=5)
     db.row_factory = sqlite3.Row
+    if exists:
+        try:
+            found = dict(db.execute("SELECT key, value FROM meta WHERE key IN ('repo', 'format', 'mark')").fetchall())
+        except sqlite3.Error:
+            found = {}
+        expected = {"repo": repo.lower(), "format": FORMAT, "mark": storage.mark(path, repo)}
+        if found != expected:
+            db.close()
+            what = "of another repository (%s)" % found.get("repo") if found.get("repo") not in (None, repo.lower()) \
+                else "not created by this plugin for this user" if found.get("mark") != expected["mark"] \
+                else "of another format"
+            raise storage.StorageError("%s is %s; it is not read. Delete it by hand to build a new one" % (path, what))
+        db.executescript(SCHEMA)
+        return db
+    os.chmod(path, 0o600)
     db.executescript(SCHEMA)
+    for key, value in (("repo", repo.lower()), ("format", FORMAT), ("mark", storage.mark(path, repo))):
+        set_meta(db, key, value)
+    db.commit()
     return db
+
+
+def since_value(db, key):
+    """A stored "since" time, used in an API query only when it is a plain ISO 8601 UTC time."""
+    value = get_meta(db, key)
+    return value if value and ISO_UTC.match(value) else None
 
 
 def get_meta(db, key, default=None):
@@ -156,10 +195,11 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
     db = connect(repo)
     if rebuild:
         for table in RAW + DERIVED:
-            db.execute("DELETE FROM %s" % table)
+            db.execute("DELETE FROM %s" % table if table != "meta" else
+                       "DELETE FROM meta WHERE key NOT IN ('repo', 'format', 'mark')")
         db.commit()
-    since_issues = get_meta(db, "issues_since")
-    since_comments = get_meta(db, "comments_since")
+    since_issues = since_value(db, "issues_since")
+    since_comments = since_value(db, "comments_since")
     summary = {"issues": 0, "comments": 0, "timelines": 0, "edits": 0, "complete": True}
 
     query = "repos/%s/issues?state=all&per_page=100&sort=updated&direction=asc" % repo
@@ -255,7 +295,6 @@ def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=
     if hub:
         read_resume(db, repo, hub, clock.left(timeout))
     derive(db, repo, hub)
-    set_meta(db, "repo", repo)
     set_meta(db, "hub", str(hub or ""))
     set_meta(db, "synced_at", now_utc())
     set_meta(db, "sync_complete", "1" if summary["complete"] else "0")
@@ -287,7 +326,9 @@ def read_resume(db, repo, hub, timeout):
         return
     url = chosen["url"] if re.fullmatch(r"https://github\.com/[\w./#-]+", chosen["url"]) else "(link not shown)"
     created = chosen["created"] if re.fullmatch(r"[\dT:Z-]+", chosen["created"]) else "unknown"
+    # Only a block that passed the trust, author and never-edited checks just now is kept.
     set_meta(db, "resume", ghim.extract_resume_block(chosen["body"]).strip())
+    set_meta(db, "resume_read_at", now_utc())
     set_meta(db, "resume_note", "newest usable resume comment on hub %s, posted %s (UTC) by %s, never edited, %s"
              % (where, created, chosen["author"], url))
     if ignored:
@@ -543,7 +584,10 @@ def main(argv=None):
               % (repo, index_path(repo), summary["issues"], summary["comments"], summary["timelines"], summary["edits"],
                  "" if summary["complete"] else "; stopped at the deadline, run sync again to finish"))
         return 0
-    db = connect(repo, create=False)
+    try:
+        db = connect(repo, create=False)
+    except storage.StorageError as error:
+        sys.exit("error: %s" % error)
     if db is None:
         sys.exit("error: no index for %s at %s; run index.py sync first" % (repo, index_path(repo)))
     if args.command == "status":
@@ -602,5 +646,5 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except ghim.GhError as error:
+    except (ghim.GhError, storage.StorageError) as error:
         sys.exit("error: %s" % error)
