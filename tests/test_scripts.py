@@ -1466,7 +1466,7 @@ class IndexTests(RecordSandbox):
         result = self.tool("index.py", "sync")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("7 issues, 6 comments, 7 timelines", result.stdout)
-        self.assertTrue(os.path.isfile(os.path.join(self.data, "example-org__tinycsv", "index.sqlite")))
+        self.assertTrue(os.path.isfile(os.path.join(self.data, "private", "example-org__tinycsv", "index.sqlite")))
         status = self.tool("index.py", "status", gh="false")
         self.assertIn("issues 7, comments 6", status.stdout)
         events = self.query("timeline", "--type", "decision")
