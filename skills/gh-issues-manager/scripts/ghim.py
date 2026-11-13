@@ -404,10 +404,49 @@ def label_changes(current, wanted, profiles):
     Only section labels of the given profiles are ever removed; role and topic
     labels are left as they are.
     """
-    known = {label for label, _ in section_labels(profiles)}
-    add = [label for label in wanted if label not in current]
-    remove = [label for label in current if label in known and label not in wanted]
+    known = {label.lower() for label, _ in section_labels(profiles)}
+    have = {label.lower() for label in current}
+    want = {label.lower() for label in wanted}
+    add = [label for label in wanted if label.lower() not in have]
+    remove = [label for label in current if label.lower() in known and label.lower() not in want]
     return add, remove
+
+
+def shipped_section_labels():
+    """Lowercase names of the section labels of every profile shipped in profiles/."""
+    names = set()
+    for name in sorted(os.listdir(PROFILE_DIR)):
+        if name.endswith(".json"):
+            names.update(label.lower() for label, _ in section_labels([name[:-5]]))
+    return names
+
+
+def plan_section_labels(labels, body, profiles):
+    """Check an issue before it gets a deliverable body, and plan its section labels.
+
+    Returns a dict:
+      stop     reasons the issue may not get a deliverable body (role labels)
+      foreign  section labels on the issue from profiles other than `profiles`
+      checked  False when the profiles define no section labels (nothing is changed)
+      wanted, add, remove, problems  as from labels_from_headings and label_changes
+    Raises ValueError for an unknown profile.
+    """
+    lower = {label.lower() for label in labels}
+    stop = []
+    for role in ("hub", "active"):
+        if role in lower:
+            stop.append("the issue is labeled %s; only a topic issue labeled final-record holds deliverable text" % role)
+    if "final-record" not in lower:
+        stop.append("the issue is not labeled final-record; label it first if it is a topic of the deliverable")
+    own = {label.lower() for label, _ in section_labels(profiles)}
+    foreign = [label for label in labels if label.lower() in shipped_section_labels() and label.lower() not in own]
+    plan = {"stop": stop, "foreign": foreign, "checked": bool(own), "wanted": [], "add": [], "remove": [],
+            "problems": []}
+    if own:
+        plan["wanted"], plan["problems"] = labels_from_headings(body, profiles, intended=labels)
+        if not plan["problems"]:
+            plan["add"], plan["remove"] = label_changes(labels, plan["wanted"], profiles)
+    return plan
 
 
 def label_command(repo, number, add, remove):

@@ -13,6 +13,8 @@ Fault switches:
   FAKE_GH_CHANGE_ON_READ=2       change the issue body just before the 2nd REST read of an issue
   FAKE_GH_COMMENT_ORDER=reversed list comments newest first in GraphQL answers
   FAKE_GH_CORRUPT=1              store bodies with one character changed
+  FAKE_GH_FAIL_ON_LABELS=1       exit 1 for an issue edit that adds or removes labels
+  FAKE_GH_IGNORE_LABELS=1        accept label changes in an issue edit but do not apply them
   FAKE_GH_SLEEP=5                sleep before answering
 """
 
@@ -125,6 +127,12 @@ def main():
         if args[2] not in state["issues"]:
             fail("gh: Not Found (HTTP 404)")
         issue = state["issues"][args[2]]
+        changes_labels = "--add-label" in args or "--remove-label" in args
+        if changes_labels and os.environ.get("FAKE_GH_FAIL_ON_LABELS"):
+            fail("gh: simulated failure while changing labels (HTTP 502)")
+        if changes_labels and os.environ.get("FAKE_GH_IGNORE_LABELS"):
+            args = [a for i, a in enumerate(args) if a not in ("--add-label", "--remove-label")
+                    and (i == 0 or args[i - 1] not in ("--add-label", "--remove-label"))]
         names = {l["name"].lower() for l in state["labels"]}
         for label in option(args, "--add-label", many=True):
             if label.lower() not in names:

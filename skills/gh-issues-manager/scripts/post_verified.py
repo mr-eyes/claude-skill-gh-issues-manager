@@ -7,15 +7,16 @@ the stored comment from the API and compares it with the draft.
 body: lints the draft, prints a diff against the body now on GitHub, saves the
 old body to a backup file, edits the issue and reads it back. Use it when what
 the deliverable says changes: the draft is the whole new text, with no folded
-old text. For a final record the section labels then follow the headings: the
-labels of new sections are added, those of removed sections are removed, and
-the labels are read back. To convert a body of an older form and keep it as a
-comment, use convert_body.py.
+old text. For a final record the issue must be labeled final-record (not hub
+or active), and the section labels then follow the headings: the labels of new
+sections are added, those of removed sections are removed (only with
+--allow-label-removal), and the labels are read back. To convert a body of an
+older form and keep it as a comment, use convert_body.py.
 
 Examples:
   post_verified.py comment --issue 12 --kind result --body-file .tmp/result.md --dry-run
   post_verified.py comment --issue 12 --kind decision --body-file .tmp/decision.md
-  post_verified.py body --issue 12 --kind final-record --body-file .tmp/topic.md --backup .tmp/topic-12.before.md
+  post_verified.py body --issue 12 --kind final-record --body-file .tmp/topic.md --backup .tmp/topic-12.before.md --dry-run
 """
 
 import argparse
@@ -59,6 +60,10 @@ def main(argv=None):
             p.add_argument("--backup", help="file that receives the body being replaced (required unless --dry-run)")
             p.add_argument("--profile", help="comma-separated profiles that define a final record's section "
                            "headings (default: profiles in .gh-issues-manager.json)")
+            p.add_argument("--allow-label-removal", action="store_true",
+                           help="let the run remove section labels whose sections the body no longer has")
+            p.add_argument("--allow-other-profiles", action="store_true",
+                           help="go on although the issue carries section labels of other profiles; they are left alone")
     args = parser.parse_args(argv)
     if args.offline and not args.dry_run:
         parser.error("--offline only makes sense with --dry-run")
@@ -72,15 +77,22 @@ def main(argv=None):
     profiles = [p.strip() for p in (getattr(args, "profile", None) or ",".join(config.get("profiles") or [])).split(",")
                 if p.strip()]
     follow = args.command == "body" and args.kind == "final-record" and not args.offline
-    current_labels = wanted = None
+    plan = None
     if follow:
-        current_labels = ghim.read_issue(repo, args.issue)["labels"]
         try:
-            wanted, problems = ghim.labels_from_headings(draft, profiles, intended=current_labels)
+            plan = ghim.plan_section_labels(ghim.read_issue(repo, args.issue)["labels"], draft, profiles)
         except ValueError as error:
             sys.exit("error: %s" % error)
-        if problems:
-            wanted = None
+        for reason in plan["stop"]:
+            print("not posted: %s#%d: %s" % (repo, args.issue, reason))
+        if plan["stop"]:
+            return 1
+        if plan["foreign"] and not args.allow_other_profiles:
+            print("not posted: %s#%d carries section labels of profiles not in use here (%s; profiles in use: %s). "
+                  "Pass --profile with the profiles of those labels, or --allow-other-profiles to leave them as they are"
+                  % (repo, args.issue, ", ".join(plan["foreign"]), ", ".join(profiles) or "none"))
+            return 1
+    wanted = plan["wanted"] if plan and plan["checked"] and not plan["problems"] else None
     if lint(args.body_file, draft, args.kind, repo, config, args.offline, labels=wanted, profiles=profiles):
         print("not posted: fix the errors above")
         return 1
@@ -107,8 +119,8 @@ def main(argv=None):
             print("section labels not checked: --offline reads nothing from GitHub")
         return 0
     labels_command = None
-    if follow:
-        add, remove = ghim.label_changes(current_labels, wanted, profiles)
+    if follow and plan["checked"]:
+        add, remove = plan["add"], plan["remove"]
         if add:
             have = {l["name"].lower() for l in json.loads(ghim.gh(
                 ["label", "list", "--repo", repo, "--json", "name", "--limit", "1000"]))}
@@ -116,6 +128,13 @@ def main(argv=None):
             if missing:
                 print("not posted: these labels do not exist in %s: %s; run setup_labels.py first"
                       % (repo, ", ".join(missing)))
+                return 1
+        if remove:
+            print("removes: %s (the body has no section for %s)"
+                  % (", ".join(remove), "it" if len(remove) == 1 else "them"))
+            if not args.dry_run and not args.allow_label_removal:
+                print("not posted: check that each of those sections left the deliverable on purpose, then rerun "
+                      "with --allow-label-removal")
                 return 1
         if add or remove:
             labels_command = ghim.label_command(repo, args.issue, add, remove)
@@ -131,9 +150,13 @@ def main(argv=None):
             print("would run: " + ghim.show_command(command, "%d characters" % len(draft)))
         if labels_command:
             print("would run: " + ghim.show_command(labels_command, "section labels follow the headings"))
+            if plan["remove"] and not args.allow_label_removal:
+                print("note: the real run removes section labels only with --allow-label-removal")
+        elif follow and not plan["checked"]:
+            print("section labels not checked: no profile defines any")
         return 0
     if not diff:
-        return follow_labels(repo, args.issue, labels_command, wanted, profiles)
+        return follow_labels(repo, args.issue, labels_command, plan, profiles)
     if not args.backup:
         sys.exit("error: --backup FILE is required so the replaced body is kept")
     if os.path.exists(args.backup):
@@ -146,11 +169,15 @@ def main(argv=None):
     ok = ghim.verify_body(draft, ghim.read_issue_body(repo, args.issue), "%s#%d" % (repo, args.issue))
     if not ok:
         return 1
-    return follow_labels(repo, args.issue, labels_command, wanted, profiles) if follow else 0
+    return follow_labels(repo, args.issue, labels_command, plan, profiles) if follow else 0
 
 
-def follow_labels(repo, number, command, wanted, profiles):
+def follow_labels(repo, number, command, plan, profiles):
     """Apply the section-label change, read the labels back and compare."""
+    if not plan["checked"]:
+        print("section labels not checked: no profile defines any")
+        return 0
+    wanted = plan["wanted"]
     if command:
         ghim.gh(command)
         print("ran: " + ghim.show_command(command))
