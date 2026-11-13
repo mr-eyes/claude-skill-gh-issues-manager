@@ -117,7 +117,7 @@ def main(argv=None):
             return 1
         lint_comment = [f for f in lint_drafts.lint_text(comment, config=config)
                         if f.level == "error" and f.code in ("secret", "restricted", "length", "resume-markers-misplaced")]
-        if lint_drafts.report("record comment", lint_comment):
+        if lint_drafts.report("record comment", lint_comment, quiet=True):
             print("nothing changed: the former body cannot be posted as a comment as it is")
             return 1
         print("record comment, %d characters:" % len(comment))
