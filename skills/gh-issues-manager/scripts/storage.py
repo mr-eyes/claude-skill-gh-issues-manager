@@ -35,7 +35,16 @@ KEY_NAME = "key"
 
 
 class StorageError(Exception):
-    """A folder or file the plugin would use is not safe to use."""
+    """A folder or file the plugin would use is not safe to use.
+
+    `kind` names the reason in a fixed word (symlink, owner, permissions, parent,
+    not-folder, key, refused, changed, name); hooks print a fixed sentence per
+    kind and never the message, which may hold paths from the environment.
+    """
+
+    def __init__(self, message, kind="unsafe"):
+        super().__init__(message)
+        self.kind = kind
 
 
 def _env_dir(name, default):
@@ -62,7 +71,7 @@ def state_top(for_key=False):
 def repo_folder(repo):
     name = repo.replace("/", "__")
     if not name or name.startswith(".") or "/" in name or "\\" in name:
-        raise StorageError("unusable repository name %r" % repo)
+        raise StorageError("unusable repository name %r" % repo, "name")
     return name
 
 
@@ -78,8 +87,13 @@ def check_top(path, create=True, tighten=True):
     parent = os.path.dirname(os.path.abspath(path))
     try:
         above = os.stat(parent)
-        if above.st_mode & stat.S_IWOTH and not above.st_mode & stat.S_ISVTX:
-            raise StorageError("%s is in %s, which anyone can write to without the sticky bit" % (path, parent))
+        sticky = above.st_mode & stat.S_ISVTX
+        if above.st_mode & stat.S_IWOTH and not sticky:
+            raise StorageError("%s is in %s, which anyone can write to without the sticky bit" % (path, parent),
+                               "parent")
+        if above.st_mode & stat.S_IWGRP and not sticky and _uid() is not None and above.st_uid != _uid():
+            raise StorageError("%s is in %s, which a group can write to and another user owns" % (path, parent),
+                               "parent")
     except FileNotFoundError:
         pass
     if not os.path.lexists(path):
@@ -91,12 +105,12 @@ def check_top(path, create=True, tighten=True):
         descriptor = os.open(path, flags)
     except OSError:
         if os.path.islink(path):
-            raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path)
-        raise StorageError("%s is not a folder the plugin can open" % path)
+            raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path, "symlink")
+        raise StorageError("%s is not a folder the plugin can open" % path, "not-folder")
     try:
         info = os.fstat(descriptor)
         if not stat.S_ISDIR(info.st_mode):
-            raise StorageError("%s is not a folder" % path)
+            raise StorageError("%s is not a folder" % path, "not-folder")
         uid = _uid()
         if uid is None or info.st_uid == uid:
             if info.st_mode & 0o077 and tighten:
@@ -107,9 +121,9 @@ def check_top(path, create=True, tighten=True):
                     os.chmod(path, 0o700)
         elif info.st_uid == 0:
             if info.st_mode & 0o022:
-                raise StorageError("%s is owned by root and writable by others" % path)
+                raise StorageError("%s is owned by root and writable by others" % path, "permissions")
         else:
-            raise StorageError("%s is owned by another user" % path)
+            raise StorageError("%s is owned by another user" % path, "owner")
     finally:
         os.close(descriptor)
     return True
@@ -118,23 +132,25 @@ def check_top(path, create=True, tighten=True):
 def check_path(path, kind="folder"):
     """Check a private folder or file: real, owned by the user, no permissions for group or others.
 
-    Returns False when it does not exist; raises StorageError when it is not safe.
+    Returns False when it does not exist, else the os.lstat result it checked;
+    raises StorageError when it is not safe.
     """
     try:
         info = os.lstat(path)
     except FileNotFoundError:
         return False
     if stat.S_ISLNK(info.st_mode):
-        raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path)
+        raise StorageError("%s is a symlink; the plugin does not follow symlinks in its storage" % path, "symlink")
     if kind == "folder" and not stat.S_ISDIR(info.st_mode) or kind == "file" and not stat.S_ISREG(info.st_mode):
-        raise StorageError("%s is not a %s" % (path, kind))
+        raise StorageError("%s is not a %s" % (path, kind), "not-folder")
     uid = _uid()
     if uid is not None and info.st_uid != uid:
-        raise StorageError("%s is not owned by the current user" % path)
+        raise StorageError("%s is not owned by the current user" % path, "owner")
     if info.st_mode & 0o077:
         raise StorageError("%s has permissions for group or others (mode %o); the plugin keeps it private. Run: "
-                           "chmod %s %s" % (path, info.st_mode & 0o777, "700" if kind == "folder" else "600", path))
-    return True
+                           "chmod %s %s" % (path, info.st_mode & 0o777, "700" if kind == "folder" else "600", path),
+                           "permissions")
+    return info
 
 
 def folder(top, *parts, create=True, tighten=True):
@@ -190,24 +206,31 @@ def user_key(create=True, tighten=True):
     """The per-user secret that marks index files this plugin created; made on first use."""
     private = folder(state_top(for_key=True), create=create, tighten=tighten)
     if private is None:
-        raise StorageError("no key yet at %s" % key_path())
+        raise StorageError("no key yet at %s" % key_path(), "no-key")
     path = os.path.join(private, KEY_NAME)
     text = read_file(path)
     if text is None:
         if not create:
-            raise StorageError("no key yet at %s" % path)
-        try:  # exclusive creation: of two first uses at the same moment, one writes and both read the same key
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        except FileExistsError:
-            pass
-        else:
+            raise StorageError("no key yet at %s" % path, "no-key")
+        # Write the whole key to a temporary file, then link it into place: a reader never sees a half-written key,
+        # and of two first uses at the same moment one link wins and both read the same key.
+        descriptor, temporary = tempfile.mkstemp(dir=private, prefix=".key-")
+        try:
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
             with os.fdopen(descriptor, "w", encoding="ascii") as handle:
                 handle.write(os.urandom(32).hex() + "\n")
+            try:
+                os.link(temporary, path)
+            except FileExistsError:
+                pass
+        finally:
+            os.unlink(temporary)
         text = read_file(path)
     key = (text or "").strip()
     if len(key) < 32 or not all(c in "0123456789abcdef" for c in key):
-        raise StorageError("the key at %s is damaged; the plugin does not replace it on its own. Move it away by "
-                           "hand, and the indexes made with it will be rebuilt" % path)
+        raise StorageError("the key at %s is empty or damaged; the plugin does not replace it on its own. Move it "
+                           "aside by hand; the indexes made with it are then rebuilt" % path, "key")
     return key.encode("ascii")
 
 

@@ -62,6 +62,14 @@ BACKGROUND_RANGE = (30, 3600)
 class RefusedIndex(storage.StorageError):
     """The index file is not this plugin's index of this repository for this user; a sync moves it aside."""
 
+
+class SyncBusy(Exception):
+    """Another sync of this repository holds the lock; there is one writer at a time."""
+
+
+class DeadlineReached(ghim.GhError):
+    """The sync's time is up; what was read is kept and derived, and the next sync goes on from there."""
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS issues(number INTEGER PRIMARY KEY, title TEXT, state TEXT, is_pr INTEGER, author TEXT,
@@ -103,17 +111,13 @@ def index_path(repo):
     return os.path.join(index_dir(repo), "index.sqlite")
 
 
-def identity_problem(path, repo, create=True, tighten=True):
-    """None when the index file at `path` is this plugin's index of `repo` for this user, else a fixed reason.
+def identity_problem(db, path, repo, create=True, tighten=True):
+    """None when the opened index `db` is this plugin's index of `repo` for this user, else a fixed reason.
 
     The reason never contains text from the file, which is not trusted until it passes.
     """
     try:
-        probe = sqlite3.connect("file:%s?mode=ro" % urllib.parse.quote(os.path.abspath(path)), uri=True, timeout=5)
-        try:
-            found = dict(probe.execute("SELECT key, value FROM meta WHERE key IN ('repo', 'format', 'mark')").fetchall())
-        finally:
-            probe.close()
+        found = dict(db.execute("SELECT key, value FROM meta WHERE key IN ('repo', 'format', 'mark')").fetchall())
     except sqlite3.Error:
         return "not an index of this plugin"
     if found.get("repo") != repo.lower():
@@ -123,7 +127,7 @@ def identity_problem(path, repo, create=True, tighten=True):
     try:
         expected = storage.mark(path, repo, create=create, tighten=tighten)
     except storage.StorageError as error:
-        if str(error).startswith("no key yet"):
+        if error.kind == "no-key":
             return "not created by this plugin for this user"  # this user has no key, so it made no index
         raise
     if not hmac_equal(found.get("mark"), expected):
@@ -141,35 +145,36 @@ def connect(repo, create=True, tighten=True):
 
     Raises storage.StorageError for an index that must not be read: a symlink,
     a file with loose permissions or another owner, or a file that is not this
-    plugin's index of this repository for this user. With create=True (a sync)
-    a file of the last kind is moved aside, renamed with a time suffix inside
-    the private folder, and a new index is built.
+    plugin's index of this repository for this user. The checks run on the file
+    that was opened. With create=True, which only a sync holding the lock uses, a
+    file of the last kind is moved aside to index.sqlite.refused (one such file
+    is kept) and a new index is built.
     """
     path = index_path(repo)
     if storage.folder(storage.cache_top(), storage.repo_folder(repo), create=create, tighten=tighten) is None:
         return None
-    exists = storage.check_path(path, "file")
-    if not exists and not create:
+    before = storage.check_path(path, "file")
+    if not before and not create:
         return None
-    moved = None
-    if exists:
-        problem = identity_problem(path, repo, create, tighten)
-        if problem and not create:
-            raise RefusedIndex("%s is %s; it is not read. The next sync (a session start or index.py sync) "
-                               "moves it aside and builds a new one" % (path, problem))
-        if problem:
-            moved = "%s.refused-%s" % (path, now_utc().replace(":", "").replace("-", ""))
-            os.rename(path, moved)
-            exists = False
-    if exists:
-        before = os.lstat(path)
+    moved = ""
+    if before:
         db = sqlite3.connect(path, timeout=5)
         if not storage.same_file(path, before):
             db.close()
-            raise storage.StorageError("%s changed while it was being opened; it is not read" % path)
+            raise storage.StorageError("%s changed while it was being opened; it is not read" % path, "changed")
         db.row_factory = sqlite3.Row
-        db.executescript(SCHEMA)
-        return db
+        problem = identity_problem(db, path, repo, create, tighten)
+        if not problem:
+            db.executescript(SCHEMA)
+            return db
+        db.close()
+        if not create:
+            raise RefusedIndex("%s is %s; it is not read. The next sync (a session start or index.py sync) moves it "
+                               "aside and builds a new one. A key that differs between environments, for example a "
+                               "terminal and a hook with another XDG_STATE_HOME or HOME, causes this" % (path, problem),
+                               "refused")
+        moved = path + ".refused"
+        os.replace(path, moved)
     db = sqlite3.connect(path, timeout=5, isolation_level=None)
     os.chmod(path, 0o600)
     db.row_factory = sqlite3.Row
@@ -178,7 +183,7 @@ def connect(repo, create=True, tighten=True):
         if statement.strip():
             db.execute(statement)
     for key, value in (("repo", repo.lower()), ("format", FORMAT), ("mark", storage.mark(path, repo)),
-                       ("moved_aside", moved or "")):
+                       ("moved_aside", moved)):
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
     db.execute("COMMIT")
     db.isolation_level = ""
@@ -309,121 +314,169 @@ def newest_of(current, stamp):
     return current
 
 
-def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=None, log=print):
+def sync(repo, hub=None, rebuild=False, timeout=60, deadline=None, timeline_cap=None, log=print, lock_held=False):
+    """Bring the index up to date under the per-repository lock; see run_sync. Raises SyncBusy when it is held."""
+    storage.folder(storage.cache_top(), storage.repo_folder(repo))
+    if not lock_held and not take_lock(repo, int(deadline) + 60 if deadline else 6 * 3600):
+        raise SyncBusy("another sync of this repository is running; try again when it has finished")
+    try:
+        return run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap)
+    finally:
+        if not lock_held:
+            release_lock(repo)
+
+
+def run_sync(repo, hub, rebuild, timeout, deadline, timeline_cap):
     """Bring the index up to date. Returns a summary dict. Raises ghim.GhError when GitHub cannot be read.
 
     Incremental: issues and comments changed since the newest stamp seen (less
     OVERLAP seconds) are read; an item whose updated_at did not change is left as
     it is. Deletions on GitHub are not seen by an incremental sync; --rebuild
-    (and compile.py, which rebuilds by default) reads everything again.
+    (and compile.py, which rebuilds by default) reads everything again: it reads
+    both listings first and replaces the stored ones in one transaction, so a
+    rebuild that cannot reach GitHub leaves the index as it was.
     """
     clock = Deadline(deadline)
 
     def call(args):
         if clock.passed():
-            raise ghim.GhError("deadline reached before %s" % " ".join(args[:2]))
-        return ghim.gh(args, timeout=clock.left(timeout))
+            raise DeadlineReached("deadline reached before %s" % " ".join(args[:2]))
+        try:
+            return ghim.gh(args, timeout=clock.left(timeout))
+        except ghim.GhError:
+            if clock.passed():
+                raise DeadlineReached("deadline reached during %s" % " ".join(args[:2]))
+            raise
 
     db = connect(repo)
     full = rebuild or not get_meta(db, "synced_at") or get_meta(db, "derive_pending") == "1"
-    set_meta(db, "derive_pending", "1")  # cleared once the derived tables are rebuilt for what this sync stores
+    set_meta(db, "derive_pending", "1")  # cleared next to synced_at, once everything stored has been derived
     db.commit()
-    if rebuild:
-        for table in RAW + DERIVED:
-            db.execute("DELETE FROM %s" % table if table != "meta" else
-                       "DELETE FROM meta WHERE key NOT IN ('repo', 'format', 'mark', 'moved_aside')")
-        db.commit()
     summary = {"issues": 0, "comments": 0, "timelines": 0, "edits": 0, "complete": True}
+    changed_issues, changed_comments = set(), set()
+    rebuilt = False
+    try:
+        if rebuild:
+            issues = [row for page in pages(call, "repos/%s/issues?state=all&sort=updated&direction=asc" % repo, None)
+                      for row in page]
+            comments = [row for page in pages(call, "repos/%s/issues/comments?sort=updated&direction=asc" % repo, None)
+                        for row in page]
+            changed_issues, changed_comments = set(), set()
+            try:  # one transaction: the old rows stay until the new ones are all in
+                for table in ("issues", "comments", "timeline") + DERIVED:
+                    db.execute("DELETE FROM %s" % table)
+                store_issue_page(db, issues, changed_issues)
+                store_comment_page(db, comments, changed_comments)
+                set_meta(db, "issues_newest", max([r.get("updated_at") or "" for r in issues] or [""]))
+                set_meta(db, "comments_newest", max([r.get("updated_at") or r.get("created_at") or "" for r in comments]
+                                                    or [""]))
+                derive(db, None, None)
+            except BaseException:
+                db.rollback()
+                raise
+            summary.update(issues=len(changed_issues), comments=len(changed_comments))
+            full, rebuilt = False, True
 
-    since = since_query(db, "issues_newest")
-    query = "repos/%s/issues?state=all&sort=updated&direction=asc" % repo
-    changed_issues = set()
-    newest = since_value(db, "issues_newest")
-    for page in pages(call, query, since):
-        store_issue_page(db, page, changed_issues)
-        for row in page:
-            newest = newest_of(newest, row.get("updated_at"))
-        set_meta(db, "issues_newest", newest or "")  # progress: a sync that stops here resumes from this page
-        db.commit()
-    summary["issues"] = len(changed_issues)
+        since = since_query(db, "issues_newest")
+        query = "repos/%s/issues?state=all&sort=updated&direction=asc" % repo
+        if not rebuild:
+            changed_issues = set()
+        newest = since_value(db, "issues_newest")
+        for page in ([] if rebuild else pages(call, query, since)):
+            store_issue_page(db, page, changed_issues)
+            for row in page:
+                newest = newest_of(newest, row.get("updated_at"))
+            set_meta(db, "issues_newest", newest or "")  # progress: a sync that stops here resumes from this page
+            db.commit()
+        if not rebuild:
+            summary["issues"] = len(changed_issues)
 
-    since = since_query(db, "comments_newest")
-    query = "repos/%s/issues/comments?sort=updated&direction=asc" % repo
-    changed_comments = set()
-    newest = since_value(db, "comments_newest")
-    for page in pages(call, query, since):
-        store_comment_page(db, page, changed_comments)
-        for row in page:
-            newest = newest_of(newest, row.get("updated_at") or row.get("created_at"))
-        set_meta(db, "comments_newest", newest or "")
-        db.commit()
-    summary["comments"] = len(changed_comments)
-    # Timelines of issues and pull requests that changed, or whose timeline is still unread.
-    pending = [r["number"] for r in db.execute("SELECT number FROM issues WHERE timeline_read = 0 ORDER BY number")]
-    for count, number in enumerate(pending):
-        if (timeline_cap is not None and count >= timeline_cap) or clock.passed():
-            summary["complete"] = False
-            break
-        rows = ghim.parse_json_stream(call(["api", "--paginate", "repos/%s/issues/%d/timeline?per_page=100"
-                                            % (repo, number)]))
-        db.execute("DELETE FROM timeline WHERE issue = ? AND event != 'edited'", (number,))
-        seq = 0
-        for row in rows:
-            event = row.get("event")
-            if event not in TIMELINE_KEEP:
-                continue
-            detail = ""
-            if row.get("label"):
-                detail = row["label"].get("name", "")
-            elif row.get("rename"):
-                detail = "%s -> %s" % (row["rename"].get("from", ""), row["rename"].get("to", ""))
-            elif row.get("state_reason"):
-                detail = row.get("state_reason")
-            seq += 1
-            db.execute("INSERT OR REPLACE INTO timeline(issue, seq, event, at, actor, detail) VALUES (?,?,?,?,?,?)",
-                       (number, seq, event, row.get("created_at"), (row.get("actor") or {}).get("login"), detail))
-        db.execute("UPDATE issues SET timeline_read = 1 WHERE number = ?", (number,))
-        changed_issues.add(number)
-        summary["timelines"] += 1
-        db.commit()
-
-    # Body edits of issues (not pull requests), marked as read only once they are stored.
-    pending = [r["number"] for r in db.execute("SELECT number FROM issues WHERE edits_read = 0 AND is_pr = 0 "
-                                               "ORDER BY number")]
-    for start in range(0, len(pending), GRAPHQL_BATCH):
-        if clock.passed() or (timeline_cap is not None and start >= timeline_cap):
-            summary["complete"] = False
-            break
-        batch = pending[start:start + GRAPHQL_BATCH]
-        raw = call(["api", "graphql", "-f", "query=" + edits_query(repo, batch)])
-        found = ((json.loads(raw).get("data") or {}).get("repository") or {})
-        for number in batch:
-            node = found.get("i%d" % number) or {}
-            created = db.execute("SELECT created_at FROM issues WHERE number = ?", (number,)).fetchone()["created_at"]
-            db.execute("UPDATE issues SET last_edited_at = ? WHERE number = ?", (node.get("lastEditedAt"), number))
-            db.execute("DELETE FROM timeline WHERE issue = ? AND event = 'edited'", (number,))
-            seq = 10000
-            for edit in (node.get("userContentEdits") or {}).get("nodes") or []:
-                at = (edit or {}).get("editedAt")
-                if not at or (created and at[:16] == created[:16]):
-                    continue  # the entry for the creation of the body
+        since = since_query(db, "comments_newest")
+        query = "repos/%s/issues/comments?sort=updated&direction=asc" % repo
+        if not rebuild:
+            changed_comments = set()
+        newest = since_value(db, "comments_newest")
+        for page in ([] if rebuild else pages(call, query, since)):
+            store_comment_page(db, page, changed_comments)
+            for row in page:
+                newest = newest_of(newest, row.get("updated_at") or row.get("created_at"))
+            set_meta(db, "comments_newest", newest or "")
+            db.commit()
+        if not rebuild:
+            summary["comments"] = len(changed_comments)
+        # Timelines of issues and pull requests that changed, or whose timeline is still unread.
+        pending = [r["number"] for r in db.execute("SELECT number FROM issues WHERE timeline_read = 0 ORDER BY number")]
+        for count, number in enumerate(pending):
+            if (timeline_cap is not None and count >= timeline_cap) or clock.passed():
+                summary["complete"] = False
+                break
+            rows = ghim.parse_json_stream(call(["api", "--paginate", "repos/%s/issues/%d/timeline?per_page=100"
+                                                % (repo, number)]))
+            db.execute("DELETE FROM timeline WHERE issue = ? AND event != 'edited'", (number,))
+            seq = 0
+            for row in rows:
+                event = row.get("event")
+                if event not in TIMELINE_KEEP:
+                    continue
+                detail = ""
+                if row.get("label"):
+                    detail = row["label"].get("name", "")
+                elif row.get("rename"):
+                    detail = "%s -> %s" % (row["rename"].get("from", ""), row["rename"].get("to", ""))
+                elif row.get("state_reason"):
+                    detail = row.get("state_reason")
                 seq += 1
                 db.execute("INSERT OR REPLACE INTO timeline(issue, seq, event, at, actor, detail) VALUES (?,?,?,?,?,?)",
-                           (number, seq, "edited", at, ((edit.get("editor") or {}).get("login")), "body"))
-                summary["edits"] += 1
-            db.execute("UPDATE issues SET edits_read = 1 WHERE number = ?", (number,))
+                           (number, seq, event, row.get("created_at"), (row.get("actor") or {}).get("login"), detail))
+            db.execute("UPDATE issues SET timeline_read = 1 WHERE number = ?", (number,))
             changed_issues.add(number)
-        db.commit()
+            summary["timelines"] += 1
+            db.commit()
 
-    if hub and not clock.passed():
-        read_resume(db, repo, hub, clock.left(timeout))
-    elif hub:
-        summary["complete"] = False
+        # Body edits of issues (not pull requests), marked as read only once they are stored.
+        pending = [r["number"] for r in db.execute("SELECT number FROM issues WHERE edits_read = 0 AND is_pr = 0 "
+                                                   "ORDER BY number")]
+        for start in range(0, len(pending), GRAPHQL_BATCH):
+            if clock.passed() or (timeline_cap is not None and start >= timeline_cap):
+                summary["complete"] = False
+                break
+            batch = pending[start:start + GRAPHQL_BATCH]
+            raw = call(["api", "graphql", "-f", "query=" + edits_query(repo, batch)])
+            found = ((json.loads(raw).get("data") or {}).get("repository") or {})
+            for number in batch:
+                node = found.get("i%d" % number) or {}
+                created = db.execute("SELECT created_at FROM issues WHERE number = ?", (number,)).fetchone()["created_at"]
+                db.execute("UPDATE issues SET last_edited_at = ? WHERE number = ?", (node.get("lastEditedAt"), number))
+                db.execute("DELETE FROM timeline WHERE issue = ? AND event = 'edited'", (number,))
+                seq = 10000
+                for edit in (node.get("userContentEdits") or {}).get("nodes") or []:
+                    at = (edit or {}).get("editedAt")
+                    if not at or (created and at[:16] == created[:16]):
+                        continue  # the entry for the creation of the body
+                    seq += 1
+                    db.execute("INSERT OR REPLACE INTO timeline(issue, seq, event, at, actor, detail) VALUES (?,?,?,?,?,?)",
+                               (number, seq, "edited", at, ((edit.get("editor") or {}).get("login")), "body"))
+                    summary["edits"] += 1
+                db.execute("UPDATE issues SET edits_read = 1 WHERE number = ?", (number,))
+                changed_issues.add(number)
+            db.commit()
+
+        if hub and not clock.passed():
+            read_resume(db, repo, hub, clock.left(timeout))
+        elif hub:
+            summary["complete"] = False
+    except DeadlineReached:
+        if rebuild and not rebuilt:
+            raise  # a rebuild that cannot finish its listings changes nothing
+        summary["complete"] = False  # keep and derive what was read; the next sync goes on from there
     derive(db, None if full else changed_issues, None if full else changed_comments)
     set_meta(db, "hub", str(hub or ""))
-    set_meta(db, "synced_at", now_utc())
     set_meta(db, "derive_pending", "0")
-    set_meta(db, "last_sync_error", "")
+    if summary["complete"]:
+        set_meta(db, "synced_at", now_utc())  # only a sync that read everything it set out to read counts
+        set_meta(db, "last_sync_error", "")
+    else:
+        set_meta(db, "partial_at", now_utc())
     set_meta(db, "sync_complete", "1" if summary["complete"] else "0")
     db.commit()
     db.close()
@@ -462,7 +515,9 @@ def running(repo):
         data = json.loads(text) if text else None
     except (storage.StorageError, ValueError, OSError):
         return None
-    if not isinstance(data, dict) or not all(isinstance(data.get(k), (int, float)) for k in ("pid", "started", "budget")):
+    if not isinstance(data, dict) or set(data) != {"pid", "started", "budget"} or \
+            not all(isinstance(data[k], (int, float)) and not isinstance(data[k], bool) for k in data) or \
+            not isinstance(data["pid"], int) or data["pid"] < 1:
         return None
     if time.time() - data["started"] > data["budget"] + 60 or not alive(int(data["pid"])):
         return None  # stale: past its budget, or the process is gone
@@ -481,6 +536,16 @@ def log_line(repo, text):
     descriptor = os.open(path, flags, 0o600)
     with os.fdopen(descriptor, "a", encoding="utf-8") as handle:
         handle.write("%s %s\n" % (now_utc(), re.sub(r"[\x00-\x1f\x7f]+", " ", text)[:500]))
+
+
+def release_lock(repo):
+    path = background_files(repo)["lock"]
+    try:
+        text = storage.read_file(path)
+        if text and json.loads(text).get("pid") == os.getpid():
+            os.unlink(path)
+    except (storage.StorageError, ValueError, OSError, AttributeError):
+        pass
 
 
 def take_lock(repo, budget):
@@ -533,7 +598,7 @@ def background_sync(repo, hub, budget, lock_held=False):
     status = {"started": now_utc()}
     try:
         log_line(repo, "background sync started, pid %d, budget %d s" % (os.getpid(), budget))
-        summary = sync(repo, hub, timeout=min(120, budget), deadline=budget)
+        summary = sync(repo, hub, timeout=min(120, budget), deadline=budget, lock_held=True)
         status.update(result="ok" if summary["complete"] else "stopped at its budget; the next sync continues",
                       summary=summary)
         log_line(repo, "background sync finished: %(issues)d issues, %(comments)d comments, %(timelines)d timelines, "
@@ -549,12 +614,7 @@ def background_sync(repo, hub, budget, lock_held=False):
         try:
             storage.write_file(files["status"], json.dumps(status))
         finally:
-            try:
-                text = storage.read_file(files["lock"])
-                if text and json.loads(text).get("pid") == os.getpid():
-                    os.unlink(files["lock"])
-            except (storage.StorageError, ValueError, OSError):
-                pass
+            release_lock(repo)
 
 
 def background_status(repo):
@@ -954,5 +1014,5 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (ghim.GhError, storage.StorageError) as error:
+    except (ghim.GhError, storage.StorageError, SyncBusy) as error:
         sys.exit("error: %s" % error)
