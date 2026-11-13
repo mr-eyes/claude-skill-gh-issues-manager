@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ghim  # noqa: E402
 import index  # noqa: E402
 import record_format  # noqa: E402
+import storage  # noqa: E402
 
 TIMELINE_COLUMNS = ["at", "type", "issue", "issue_title", "labels", "title", "author", "url", "recorded", "reconstructed"]
 BLOCK_COLUMNS = ["id", "issue", "title", "section", "caption", "image", "ref", "path", "data", "command"]
@@ -214,5 +215,5 @@ def main(argv=None):
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except ghim.GhError as error:
+    except (ghim.GhError, storage.StorageError) as error:
         sys.exit("error: %s" % error)
