@@ -35,7 +35,7 @@ python3 scripts/lint_drafts.py --kind result --repo owner/name --online draft.md
 | Mermaid: `#`, parentheses, unquoted labels, nodes undefined or unused | error |
 | Resume comment: heading with timestamp, markers, all six fields, block length; resume markers inside a hub body | error |
 | Final record: title line, at least one section, every section filled, "Sources" last | error |
-| Final record: an "As of" line with a date, month or year, a date and time in the text, a `<details>` block, a heading for decisions, open work, provenance or next steps, a dated heading outside "Sources" | error |
+| Final record: an "As of" line with a date, month or year, a date and time in the text, a `<details>` block, a heading for decisions, open work, provenance, next steps or the other sections of the older record form (current state, not established, code and evidence, related topics, history, status), a dated heading outside "Sources" | error |
 | Final record: a line that looks like a section heading but is not one (`### Results`, `##Results`, indented, underlined, inside a code block) | error |
 | Final record: a `## ` heading that is not a section heading of the project's profiles, or that two profiles share and the labels do not settle | error |
 | Final record: section labels that disagree with the headings (`--labels`, or the labels in a manifest) | error |

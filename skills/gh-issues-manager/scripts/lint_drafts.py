@@ -39,8 +39,10 @@ HISTORY_HEADING = re.compile(
     r"|history|status)\s*$", re.I)
 DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 # "As of" followed by a date, a month or a year, at the start of a line or of a list item.
-AS_OF = re.compile(r"^\s*(?:(?:[-*+]|\d+\.)\s+)?[*_]*as of\s+[*_]*(?:\d{4}\b|\d{1,2}[/.]\d"
-                   r"|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)", re.I)
+AS_OF = re.compile(r"^\s*(?:(?:[-*+]|\d+\.)\s+)?[*_]*as of\s+[*_]*"
+                   r"(?:the\s+)?(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:(?:19|20)\d{2}\b|\d{1,2}[/.]\d|(?:jan(?:uary)?"
+                   r"|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?"
+                   r"|nov(?:ember)?|dec(?:ember)?)\b)", re.I)
 
 RESUME_FIELDS = [
     "**Last updated:**",
@@ -350,7 +352,7 @@ def check_final_record(text, template, labels, profiles, add):
     for number, line, region in split_regions(text):
         if number == first[0] or region == "fence" or (region == "prose" and re.match(r"^## +\S", line)):
             continue
-        if region == "code" and not line.lstrip().startswith("#"):
+        if region == "code" and not line.lstrip().startswith("##"):
             continue
         candidate = re.sub(r"[\s#:]*$", "", re.sub(r"^\s*#*\s*", "", line))
         if candidate and candidate.lower() in names:

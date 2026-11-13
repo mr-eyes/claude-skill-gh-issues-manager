@@ -181,6 +181,8 @@ class LintTests(unittest.TestCase):
             "dated-heading": results + "### Rerun of 2026-03-09\n\nSame medians.\n\n",
             "as-of list item": results + "- As of March 2026, the medians hold.\n\n",
             "as-of numbered year": results + "1. **As of 2026** the medians hold.\n\n",
+            "as-of day month year": results + "As of 3 March 2026 the medians hold.\n\n",
+            "as-of the run": results + "As of the 2026-03-09 run the medians hold.\n\n",
             "dated-text": results + "Measured on 2026-03-04 14:10 PST.\n\n",
         }
         for heading in ("Decisions", "Decision", "Decision record", "Open work", "Open questions", "Provenance",
@@ -209,6 +211,8 @@ class LintTests(unittest.TestCase):
         ordinary = ("### Next generation sequencing\n\nx\n\n### Next token prediction\n\nx\n\n"
                     "### Decisions under uncertainty\n\nx\n\n### Provenance tracking\n\nx\n\n"
                     "### Current state estimation\n\nx\n\nAs of version 3 the API returns JSON.\n\n"
+                    "As of marked rows, none are dropped.\n\nAs of mayhem there is none.\n\n"
+                    "As of 1000 rows the reader streams.\n\n"
                     "> As of 2026-03-04 the default changed, wrote the maintainer.\n\n")
         quiet = text.replace("## Results\n", "## Results\n\n" + ordinary, 1)
         quiet = quiet.replace("| Timing method |", "| Measured 2026-03-04 14:10 PST |")

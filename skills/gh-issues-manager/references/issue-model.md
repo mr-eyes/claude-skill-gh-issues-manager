@@ -57,7 +57,7 @@ What the text may and may not hold:
 | Every number with its denominator | Folded "Replaced on" blocks or any other old text |
 | A design choice with a one-sentence reason | Decision tables or the story of a decision |
 | A limitation stated as a property of the final method or result | The story of a failed attempt |
-| Sub-headings (`###`) inside a section | Open work, next steps, provenance, links to older trackers, job identifiers |
+| Sub-headings (`###`) inside a section, not named like a section heading | Open work, next steps, provenance, links to older trackers, job identifiers |
 
 The linter enforces what it can see: no "As of" line followed by a date, month or year, no date and time in the text, no `<details>` block, no heading for decisions, open work, provenance, next steps or the other sections of the older record form, no dated heading outside "Sources", "Sources" last, no line that looks like a section heading but is not one, and section headings that agree with the issue's labels. It cannot see a job identifier, a missing denominator or a commit outside "Sources"; review catches those.
 
