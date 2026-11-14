@@ -3575,8 +3575,9 @@ class DiscoveryTests(RecordSandbox):
         self.write_config(dict(self.config, profiles=["research"]))
         self.ready()
         os.makedirs(os.path.join(self.project, ".github", "workflows"))
-        with open(os.path.join(self.project, ".github", "workflows", "recortex-triage.yml"), "w") as handle:
-            handle.write("name: recortex-triage\n")
+        for name in (names.WORKFLOW, names.OLD_WORKFLOW):  # the labeler under its current and its earlier name
+            with open(os.path.join(self.project, ".github", "workflows", name), "w") as handle:
+                handle.write("name: %s\n" % name[:-4])
         only_labeler = self.hook("session-start").stdout
         self.assertIn("===== END PROJECT STATUS DATA =====", only_labeler)
         self.assertNotIn("setup does not cover", only_labeler)
@@ -4017,6 +4018,55 @@ class SetupTests(Sandbox):
         self.assertEqual([names.OLD_CONFIG_NAME], [n for n in os.listdir(root) if n.endswith(".json")])
         config = json.loads(recortex.read_text(os.path.join(root, names.OLD_CONFIG_NAME)))
         self.assertEqual((["software", "manuscript"], hub), (recortex.profile_names(config["profiles"]), config["hub"]))
+
+    def test_an_installed_labeler_of_the_earlier_name_is_kept(self):
+        root = self.project([".github/workflows/" + names.OLD_WORKFLOW])
+        installed = os.path.join(root, ".github", "workflows", names.OLD_WORKFLOW)
+        current = os.path.join(root, ".github", "workflows", names.WORKFLOW)
+        dry = self.setup_script("apply", "--answers", self.answers("single"), "--root", root, "--dry-run")
+        self.assertEqual(0, dry.returncode, dry.stdout + dry.stderr)
+        self.assertIn("kept: %s already labels new issues; no second labeler is written\n" % installed, dry.stdout)
+        self.assertNotIn(names.WORKFLOW, dry.stdout)
+        env = {"XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "CLAUDE_PROJECT_DIR": root}
+        real = self.setup_script("apply", "--answers", self.answers("single"), "--root", root, "--yes", gh=FAKE, env=env)
+        self.assertEqual(0, real.returncode, real.stdout + real.stderr)
+        self.assertIn("kept: %s already labels new issues" % installed, real.stdout)
+        self.assertFalse(os.path.lexists(current))
+        self.assertEqual("x\n", recortex.read_text(installed))
+        fresh = self.project()
+        written = self.setup_script("apply", "--answers", self.answers("single"), "--root", fresh, "--yes", gh=FAKE,
+                                    env=dict(env, CLAUDE_PROJECT_DIR=fresh))
+        self.assertEqual(0, written.returncode, written.stdout + written.stderr)
+        self.assertNotIn("kept: ", written.stdout)
+        self.assertEqual([names.WORKFLOW], os.listdir(os.path.join(fresh, ".github", "workflows")))
+        sys.path.insert(0, SCRIPTS)
+        import setup
+        both = self.project([".github/workflows/" + names.OLD_WORKFLOW, ".github/workflows/" + names.WORKFLOW])
+        self.assertEqual([], setup.uncovered_signals(both, {"profiles": ["software"]}))  # neither is a deliverable
+
+    def test_a_claude_md_that_names_the_earlier_skill_gets_a_note(self):
+        root = self.project()
+        old_snippet = ("# Notes\n\n## Project record\n\nThe record is in the GitHub issues of example-org/tinycsv.\n"
+                       "- Use the `%s` skill to record results, decisions, failures and merged changes, and to resume.\n"
+                       "\n## Other\n\nText.\n" % names.OLD_NAME)
+        claude = os.path.join(root, "CLAUDE.md")
+        with open(claude, "w") as handle:
+            handle.write(old_snippet)
+        note = "note: that section names the %s skill, which is now called %s" % (names.OLD_NAME, names.NAME)
+        for mode in ("--dry-run", "--yes"):
+            env = {"XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "CLAUDE_PROJECT_DIR": root}
+            result = self.setup_script("apply", "--answers", self.answers("single", triage_workflow=False), "--root",
+                                       root, mode, gh=FAKE, env=env)
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            self.assertIn("not written: CLAUDE.md already has a Project record section\n", result.stdout, mode)
+            self.assertEqual(1, result.stdout.count(note), mode)
+            self.assertEqual(old_snippet, recortex.read_text(claude))  # never rewritten
+        current = old_snippet.replace("`%s` skill" % names.OLD_NAME, "`%s` skill" % names.NAME)
+        with open(claude, "w") as handle:
+            handle.write(current + "\n## Later\n\nThe %s plugin was used here once.\n" % names.OLD_NAME)
+        again = self.setup_script("apply", "--answers", self.answers("single", triage_workflow=False), "--root", root,
+                                  "--dry-run")
+        self.assertNotIn(note, again.stdout)  # only the Project record section is looked at
 
     def test_apply_writes_no_file_through_a_symlink(self):
         victim = self.write("victim.txt", "keep\n")
