@@ -460,7 +460,8 @@ def lock_lines(repo, active, problems):
     except OSError:
         return
     print("sync lock claim: %s is there, time stamp %d s ago; a process holds it while it judges the lock, and a "
-          "claim left by a process that died is removed by the next sync after about two seconds" % (claim, age))
+          "claim left by a process that died is removed by the next sync that finds a lock in its way, after about "
+          "two seconds" % (claim, age))
 
 
 def doctor():
