@@ -3127,6 +3127,119 @@ class RecoveryTests(RecordSandbox):
         self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
         self.assertFalse(os.path.lexists(lock + ".claim"))
 
+    def test_a_lock_that_goes_away_before_the_claim_is_not_an_error(self):
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real, done = storage_module.check_path, []
+
+        def gone(path, kind="folder"):
+            out = real(path, kind)
+            if path == lock and not done:
+                done.append(1)
+                os.unlink(lock)  # its holder released it, or another judge removed it
+            return out
+
+        storage_module.check_path = gone
+        try:
+            self.assertTrue(index_module.take_lock(REPO, 300))
+        finally:
+            storage_module.check_path = real
+        self.assertEqual([1], done)
+
+    def test_a_lock_swapped_for_a_fifo_after_the_check_is_refused_and_does_not_block(self):
+        import threading
+        import index as index_module
+        storage_module = sys.modules["storage"]
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: [os.unlink(p) for p in (lock, lock + ".was") if os.path.lexists(p)])
+        real = storage_module.check_path
+
+        def swap(path, kind="folder"):
+            out = real(path, kind)
+            if path == lock and not os.path.lexists(lock + ".was"):
+                os.rename(lock, lock + ".was")
+                os.mkfifo(lock, 0o600)
+            return out
+
+        def writer():  # a read that waits for a writer gets one after 4 s, so the test fails instead of hanging
+            try:
+                os.close(os.open(lock, os.O_WRONLY | os.O_NONBLOCK))
+            except OSError:
+                pass
+
+        timer = threading.Timer(4.0, writer)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        storage_module.check_path = swap
+        started = time.monotonic()
+        try:
+            with self.assertRaises(storage_module.StorageError) as caught:
+                index_module.take_lock(REPO, 300)
+        finally:
+            storage_module.check_path = real
+        self.assertEqual("not-folder", caught.exception.kind)
+        self.assertLess(time.monotonic() - started, 3.5)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_an_interrupt_at_the_stamp_drops_the_claim(self):
+        import index as index_module
+        lock = self.in_process()
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real = os.utime
+
+        class Alarm(BaseException):  # as hooks.OutOfTime: not an Exception
+            pass
+
+        def utime(path, *args, **kw):
+            if path == lock + ".claim":
+                raise Alarm()
+            return real(path, *args, **kw)
+
+        os.utime = utime
+        try:
+            with self.assertRaises(Alarm):
+                index_module.take_lock(REPO, 300)
+        finally:
+            os.utime = real
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
+    def test_the_file_that_was_read_cannot_come_back_as_a_new_lock(self):
+        """With the descriptor held, a new lock made after the stale one went cannot get its inode number. Where the
+        file system reuses numbers at once (ext4, tmpfs), closing the descriptor early makes this fail."""
+        import index as index_module
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock)
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        real, done = index_module._identity, []
+
+        def identity(path):
+            if path == lock and not done:
+                done.append(1)
+                stamp = os.lstat(lock).st_mtime_ns
+                os.unlink(claim)  # dropped as abandoned by a waiting process ...
+                os.unlink(lock)   # ... which removed the stale lock ...
+                self.plant_lock(lock, pid=os.getpid())  # ... and a third process took a new one
+                os.utime(lock, ns=(stamp, stamp))  # a file system with coarse time stamps: the same stamp
+                os.link(lock, claim)  # and a fourth claims it
+                os.utime(claim, ns=(stamp, stamp))
+            return real(path)
+
+        index_module._identity = identity
+        try:
+            self.assertFalse(index_module.take_lock(REPO, 300))
+        finally:
+            index_module._identity = real
+            if os.path.lexists(claim):
+                os.unlink(claim)
+        self.assertEqual([1], done)
+        self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
+
     def test_the_waits_of_the_lock_are_measured_on_the_monotonic_clock(self):
         import types
         import index as index_module
@@ -3242,6 +3355,15 @@ class RecoveryTests(RecordSandbox):
         self.assertIn("sync lock: refused (", refused.stdout)
         self.assertIn("problem: sync lock refused: ", refused.stdout)
         self.assertEqual(1, refused.returncode)
+
+    def test_doctor_says_nothing_about_a_live_lock(self):
+        self.ready()
+        lock = os.path.join(self.folder(), "sync.lock")
+        self.plant_lock(lock, pid=os.getpid())
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        doctor = self.tool("hooks.py", "--doctor").stdout
+        self.assertIn("background sync: running (pid %d" % os.getpid(), doctor)
+        self.assertNotIn("sync lock:", doctor)
 
     def test_lock_fields_and_hosts(self):
         import index as index_module
