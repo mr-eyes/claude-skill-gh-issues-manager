@@ -19,9 +19,10 @@ limit=$((10#$limit))                            # base 10, so 08 and 09 are numb
 [ "$limit" -le 15 ] || limit=15
 export GHIM_HOOK_TIMEOUT="$limit"
 # The safety net stays below each hook's timeout in hooks.json (SessionStart 20, SubagentStart 10,
-# UserPromptSubmit 5, PreCompact 10). The background sync is detached and has its own deadline.
+# UserPromptSubmit 5, PreCompact 10); session-start gets at least 6 s, so a second wait of up to 3 s on the
+# sync lock after the sync's alarm still ends inside it. The background sync is detached and has its own deadline.
 case "$event" in
-  session-start) hard=$((limit + 3)) ;;
+  session-start) hard=$((limit + 3)); [ "$hard" -ge 6 ] || hard=6 ;;   # room for a second wait on the sync lock
   prompt-submit) hard=4 ;;
   *) hard=8 ;;
 esac

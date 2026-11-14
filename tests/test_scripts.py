@@ -3200,6 +3200,17 @@ class RecoveryTests(RecordSandbox):
         self.assertEqual("lock", caught.exception.kind)
         self.assertFalse(os.path.lexists(lock + ".claim"))
 
+    def test_a_left_claim_does_not_silence_the_smallest_hook_budget(self):
+        self.ready()
+        lock = os.path.join(self.folder(), "sync.lock")
+        self.plant_lock(lock)
+        os.link(lock, lock + ".claim")  # left by a judge that died while it held the claim
+        self.addCleanup(lambda: [os.unlink(p) for p in (lock + ".claim", lock) if os.path.lexists(p)])
+        out = self.hook("session-start", env={"GHIM_HOOK_TIMEOUT": "1"}).stdout
+        self.wait_background()
+        self.assertIn("gh-issues-manager record brief for example-org/tinycsv (cached, not refreshed", out)
+        self.assertFalse(os.path.lexists(lock + ".claim"))
+
     def test_doctor_names_a_lock_that_is_not_live_and_a_claim(self):
         self.ready()
         lock = os.path.join(self.folder(), "sync.lock")
