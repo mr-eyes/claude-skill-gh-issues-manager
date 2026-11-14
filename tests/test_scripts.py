@@ -3037,6 +3037,28 @@ class RecoveryTests(RecordSandbox):
         self.assertEqual(before[:2], seen[0][:2])  # the same file
         self.assertNotEqual(before, seen[0])  # but another claim than a left one on that file
 
+    def test_dropping_a_claim_that_was_never_seen_removes_nothing(self):
+        import index as index_module
+        lock = self.in_process()
+        claim = lock + ".claim"
+        self.plant_lock(lock, pid=os.getpid())
+        self.addCleanup(lambda: [os.unlink(p) for p in (claim, lock) if os.path.lexists(p)])  # before the sandbox cleanup
+        real, made = index_module._identity, []
+
+        def identity(path):
+            out = real(path)
+            if out is None and path == claim:
+                made.append(1)
+                os.link(lock, claim)  # another process makes its claim just after this one saw none
+            return out
+
+        index_module._identity = identity
+        try:
+            index_module._drop_claim(claim, None)
+        finally:
+            index_module._identity = real
+        self.assertEqual(bool(made), os.path.lexists(claim))  # a claim made meanwhile is still there
+
     def test_a_claim_removed_before_it_is_stamped_is_not_an_error(self):
         import index as index_module
         lock = self.in_process()

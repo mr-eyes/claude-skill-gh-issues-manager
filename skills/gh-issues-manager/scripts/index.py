@@ -673,8 +673,9 @@ def claim_not_a_file(claim):
 
 def _drop_claim(claim, identity):
     """Remove the claim link while it is still the claim `identity` names (device, inode and time stamp); a claim
-    made since by another process, which carries a later time stamp, stays."""
-    if _identity(claim) == identity:
+    made since by another process, which carries a later time stamp, stays. Nothing is removed when `identity` is
+    None."""
+    if identity is not None and _identity(claim) == identity:
         try:
             os.unlink(claim)
         except FileNotFoundError:
