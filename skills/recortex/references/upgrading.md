@@ -11,7 +11,7 @@ claude plugin marketplace update mr-eyes-skills
 claude plugin install recortex@mr-eyes-skills
 ```
 
-Then start a new session. If the brief and the skill stopped appearing without your doing anything, the marketplace was updated for you: `claude plugin list` no longer shows the plugin, and the second command brings it back. Add `--scope project` or `--scope local` if that is how you installed it.
+Then start a new session. If the brief and the skill stopped appearing without your doing anything, the marketplace was updated for you. `claude plugin list` may still show gh-issues-manager as enabled, but `claude plugin update gh-issues-manager@mr-eyes-skills` fails with "not found"; the second command brings it back. Add `--scope project` or `--scope local` if that is how you installed it.
 
 The marketplace lists the plugin under its new name and maps the old one to it (`renames` in `marketplace.json`), so Claude Code moves the enabled entry in your settings to `recortex@mr-eyes-skills`. It does not install the new name on its own: between the two commands the plugin is not loaded, and no hook runs. `claude plugin update gh-issues-manager@mr-eyes-skills` fails with "not found" once the marketplace is updated; install the new name instead. Until you update the marketplace you stay on the installed 0.4.x, which keeps working. Run `claude plugin list` afterwards: it shows `recortex@mr-eyes-skills`, version 0.5.0 or later. The old plugin folder, `~/.claude/plugins/cache/mr-eyes-skills/gh-issues-manager/`, is left behind and can be deleted.
 
