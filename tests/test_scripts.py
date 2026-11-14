@@ -4000,6 +4000,24 @@ class SetupTests(Sandbox):
         self.assertIn("ms:data-availability", {l["name"] for l in self.repo()["labels"]})
         self.assertEqual(1, recortex.read_text(os.path.join(self.dir, "trusted-repos")).count(REPO))
 
+    def test_apply_adds_to_a_setup_under_the_earlier_file_name(self):
+        root = self.project()
+        env = {"XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "CLAUDE_PROJECT_DIR": root}
+        first = self.setup_script("apply", "--answers", self.answers("single", triage_workflow=False, claude_md=False),
+                                  "--root", root, "--yes", gh=FAKE, env=env)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        self.assertEqual([names.CONFIG_NAME], [n for n in os.listdir(root) if n.endswith(".json")])  # a new setup
+        os.rename(os.path.join(root, names.CONFIG_NAME), os.path.join(root, names.OLD_CONFIG_NAME))
+        hub = json.loads(recortex.read_text(os.path.join(root, names.OLD_CONFIG_NAME)))["hub"]
+        again = self.setup_script("apply", "--answers", self.answers("custom", deliverables=[{"kind": "paper"}]),
+                                  "--root", root, "--yes", gh=FAKE, env=env)
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertIn("kept from the existing setup: software", again.stdout)
+        self.assertIn("config (%s):" % names.OLD_CONFIG_NAME, again.stdout)
+        self.assertEqual([names.OLD_CONFIG_NAME], [n for n in os.listdir(root) if n.endswith(".json")])
+        config = json.loads(recortex.read_text(os.path.join(root, names.OLD_CONFIG_NAME)))
+        self.assertEqual((["software", "manuscript"], hub), (recortex.profile_names(config["profiles"]), config["hub"]))
+
     def test_apply_writes_no_file_through_a_symlink(self):
         victim = self.write("victim.txt", "keep\n")
         outside = os.path.join(self.dir, "outside")
@@ -4317,6 +4335,81 @@ class EarlierNameTests(RecordSandbox):
                           ({"RECORTEX_TEST_KEEP": "", "GHIM_TEST_KEEP": "1"}, True)):
             with mock.patch.dict(os.environ, environment_for(os.environ, env), clear=True):
                 self.assertEqual(kept, keep_folders(), env)
+
+    def set_meta(self, **values):
+        import sqlite3
+        db = sqlite3.connect(os.path.join(self.data, "private", "example-org__tinycsv", "index.sqlite"))
+        for key, value in values.items():
+            db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, value))
+        db.commit()
+        db.close()
+
+    def use_earlier_config_name(self, project=None):
+        project = project or self.project
+        os.rename(os.path.join(project, names.CONFIG_NAME), os.path.join(project, names.OLD_CONFIG_NAME))
+
+    def payloads(self, session):
+        """The four payloads from the index, GitHub not read, for a new session; the prompt hook for a session that
+        has had no brief, so it gives the whole brief."""
+        return [self.hook("session-start", session=session, gh="false").stdout,
+                self.hook("subagent-start", session=session, gh="false").stdout,
+                self.hook("prompt-submit", session=session + "-p", gh="false").stdout,
+                self.hook("pre-compact", session=session, gh="false").stdout]
+
+    def test_a_project_under_the_earlier_file_name_gets_the_same_payloads(self):
+        self.ready()
+        self.set_meta(synced_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 10.5 * 86400)))
+        current = self.payloads("current")
+        self.use_earlier_config_name()
+        earlier = self.payloads("earlier")
+        self.assertEqual(current, earlier)
+        self.assertTrue(all(earlier), earlier)
+        self.assertIn("(cached, not refreshed (index synced", earlier[0])
+        self.assertIn("**Current focus:** Release 0.3.0", earlier[0])
+        config = os.path.join(self.project, names.OLD_CONFIG_NAME)
+        out = os.path.join(self.dir, "out")
+        for script, args in (
+                ("index.py", ["sync"]), ("hooks.py", ["--print"]), ("setup_labels.py", ["--dry-run"]),
+                ("snapshot.py", ["--out", out, "--dry-run"]), ("compile.py", ["--out", out, "--dry-run"]),
+                ("create_issues.py", ["--manifest", self.manifest, "--dry-run"]),
+                ("resume_block.py", ["update", "--file", os.path.join(self.drafts, "resume-1.md"), "--dry-run"]),
+                ("post_verified.py", ["comment", "--issue", "5", "--kind", "result", "--body-file",
+                                      os.path.join(self.drafts, "result-speed-1.md"), "--dry-run"])):
+            result = self.tool(script, *args)
+            self.assertIn("config: %s  repo: %s\n" % (config, REPO), result.stdout, (script, result.stderr))
+
+    def test_the_current_file_name_wins_over_the_earlier_one(self):
+        self.ready()
+        with open(os.path.join(self.project, names.OLD_CONFIG_NAME), "w") as handle:
+            json.dump({"repo": "example-org/other", "hub": 99}, handle)
+        self.assertIn("the GitHub issues of example-org/tinycsv, hub #4 and", self.hook("pre-compact").stdout)
+        self.assertIn("config: %s  repo: %s\n" % (os.path.join(self.project, names.CONFIG_NAME), REPO),
+                      self.tool("index.py", "sync").stdout)
+
+    def test_a_configuration_file_above_the_project_root_is_not_read_under_either_name(self):
+        self.ready()
+        inner = os.path.join(self.project, "inner")  # the project root; its parent holds the configuration
+        os.makedirs(inner)
+        for name in (names.CONFIG_NAME, names.OLD_CONFIG_NAME):
+            if name != names.CONFIG_NAME:
+                self.use_earlier_config_name()
+            self.assertTrue(os.path.isfile(os.path.join(self.project, name)))
+            for event in ("session-start", "subagent-start", "pre-compact"):
+                self.assertEqual("", self.hook(event, env={"CLAUDE_PROJECT_DIR": inner}).stdout, (name, event))
+            doctor = self.tool("hooks.py", "--doctor", env={"CLAUDE_PROJECT_DIR": inner}).stdout
+            self.assertIn("config: none found at the project root (%s)" % inner, doctor)
+
+    def test_no_discovery_line_where_the_earlier_file_name_is_there(self):
+        root = os.path.join(self.dir, "checkout")
+        subprocess.run(["git", "init", "-q", root], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "remote", "add", "origin", "https://github.com/example-org/x.git"],
+                       check=True, capture_output=True)
+        earlier = os.path.join(root, names.OLD_CONFIG_NAME)
+        with open(earlier, "w") as handle:
+            handle.write("{}")
+        self.assertEqual("", self.hook("session-start", env={"CLAUDE_PROJECT_DIR": root}).stdout)
+        os.unlink(earlier)  # without it the project gets the line: the file was the reason
+        self.assertIn("this project has no record yet", self.hook("session-start", env={"CLAUDE_PROJECT_DIR": root}).stdout)
 
     def test_run_hook_reads_the_earlier_budget_name_as_digits_only(self):
         self.ready()

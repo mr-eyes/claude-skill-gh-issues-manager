@@ -14,7 +14,7 @@ import sys
 
 import names
 
-CONFIG_NAME = ".recortex.json"
+CONFIG_NAME = names.CONFIG_NAME
 BODY_LIMIT = 65536
 RESUME_START = "<!-- ghim:resume:start -->"
 RESUME_END = "<!-- ghim:resume:end -->"
@@ -85,13 +85,19 @@ def find_config():
     """Path of the project's configuration file, or None.
 
     RECORTEX_CONFIG, set by the user, names a file explicitly. Otherwise only
-    <project root>/.recortex.json is considered.
+    the project root is considered: <project root>/.recortex.json, else the
+    file under the name it had before the rename (names.OLD_CONFIG_NAME), which
+    is read as before. A parent folder is never searched under either name.
     """
     env = names.env("CONFIG")
     if env:
         return env if os.path.isfile(env) else None
-    candidate = os.path.join(project_root(), CONFIG_NAME)
-    return candidate if os.path.isfile(candidate) else None
+    root = project_root()
+    for name in (names.CONFIG_NAME, names.OLD_CONFIG_NAME):
+        candidate = os.path.join(root, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 def load_config():

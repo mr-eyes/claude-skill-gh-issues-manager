@@ -49,6 +49,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import recortex  # noqa: E402
+import names  # noqa: E402
 import lint_drafts  # noqa: E402
 import setup_labels  # noqa: E402
 import storage  # noqa: E402
@@ -589,8 +590,15 @@ def add_trusted(repo):
     return path
 
 
+def config_target(root):
+    """The configuration file `apply` writes: the file under its name from before the rename when only that one is
+    there, so a rerun in an older project adds to it and makes no second file; else .recortex.json."""
+    new, old = os.path.join(root, names.CONFIG_NAME), os.path.join(root, names.OLD_CONFIG_NAME)
+    return old if os.path.lexists(old) and not os.path.lexists(new) else new
+
+
 def apply(answers, root, dry, drafts):
-    config_path = os.path.join(root, recortex.CONFIG_NAME)
+    config_path = config_target(root)
     drafts_base = os.path.dirname(drafts) if outside(drafts, root) else root
     workflow = os.path.join(root, ".github", "workflows", "recortex-triage.yml")
     claude_md = os.path.join(root, "CLAUDE.md")
@@ -631,7 +639,7 @@ def apply(answers, root, dry, drafts):
             "create the private repository that holds the record")
 
     labels = setup_labels.wanted_labels(config["profiles"], config["topics"])  # checked before anything is written
-    print("config (.recortex.json):")
+    print("config (%s):" % os.path.basename(config_path))
     print(json.dumps(config, indent=2))
     write_text(config_path, json.dumps(config, indent=2) + "\n", dry, "the project's setup", root)
 
