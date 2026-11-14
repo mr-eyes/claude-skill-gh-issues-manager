@@ -1864,8 +1864,8 @@ class StorageTests(RecordSandbox):
                     {"XDG_CONFIG_HOME": "rel", "RECORTEX_TRUSTED_FILE": "rel-trusted", "HOME": home}):
             self.assertEqual("", self.hook("session-start", env=env).stdout, env)  # not trusted: silent
             doctor = self.tool("hooks.py", "--doctor", env=env).stdout
-            self.assertIn("trusted: no (trusted list: %s" % os.path.join(home, ".config", "recortex",
-                                                                          "trusted-repos"), doctor)
+            self.assertIn("trusted: no (trusted lists read: %s (missing), %s (missing);" % tuple(
+                os.path.join(home, ".config", name, "trusted-repos") for name in (names.NAME, names.OLD_NAME)), doctor)
 
     def test_index_goes_to_the_user_cache_never_the_project_or_the_plugin_data_folder(self):
         del self.env["RECORTEX_DATA_HOME"]
@@ -4707,6 +4707,54 @@ class EarlierNameTests(RecordSandbox):
         for text in earlier:
             self.assertNotIn("SYSTEM", text)
             self.assertNotIn("Planted", text)
+
+    def test_doctor_names_every_earlier_name_in_use_as_notes(self):
+        self.xdg_storage(cache=[(names.OLD_NAME, 0o700)], state=[(names.OLD_NAME, 0o700)])
+        self.use_earlier_config_name()
+        listed = os.path.join(self.dir, "xdg-config", names.OLD_NAME, "trusted-repos")
+        os.makedirs(os.path.dirname(listed))
+        with open(listed, "w") as handle:
+            handle.write("%s octo-dev\n" % REPO)
+        self.env.update({"RECORTEX_GH": None, "GHIM_GH": FAKE, "RECORTEX_TRUSTED_FILE": None,
+                         "RECORTEX_HOOK_TIMEOUT": None, "GHIM_HOOK_TIMEOUT": "60",
+                         "GHIM_TRUSTED_REPOS": "%s,example-org/value-never-printed" % REPO,
+                         "RECORTEX_SYNC_PAGE": "50", "GHIM_SYNC_PAGE": "2"})
+        self.ready()
+        self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
+        doctor = self.tool("hooks.py", "--doctor")
+        self.assertEqual(0, doctor.returncode, doctor.stdout + doctor.stderr)
+        lines = doctor.stdout.split("\n")
+        self.assertEqual("result: the hooks can show the brief", lines[-2])
+        self.assertNotIn("problem:", doctor.stdout)
+        self.assertIn("note: this is the file name from before the rename; it is read as before. Rename it to "
+                      ".recortex.json once everyone on the project has recortex 0.5.0 or later.", lines)
+        current = os.path.join(self.dir, "xdg-config", names.NAME, "trusted-repos")
+        self.assertIn("trusted: yes (trusted lists read: %s (missing), %s; GHIM_TRUSTED_REPOS set; listed in %s, "
+                      "GHIM_TRUSTED_REPOS); allowed authors: example-org, octo-dev" % (current, listed, listed), lines)
+        used = " (the folder name from before the rename, used in place)"
+        self.assertTrue(doctor.stdout.count("storage: index under %s%s, state and key under %s%s; " % (
+            os.path.join(self.dir, "xdg-cache", names.OLD_NAME), used, os.path.join(self.dir, "xdg-state", names.OLD_NAME),
+            used)) == 1, doctor.stdout)
+        for variable in ("GH", "TRUSTED_REPOS", "HOOK_TIMEOUT"):
+            self.assertIn("environment: GHIM_%s is set and read (earlier name; RECORTEX_%s is not set)"
+                          % (variable, variable), lines)
+        self.assertIn("environment: GHIM_SYNC_PAGE and RECORTEX_SYNC_PAGE are both set; RECORTEX_SYNC_PAGE is used",
+                      lines)
+        self.assertEqual(4, len([l for l in lines if l.startswith("environment: ")]))
+        self.assertNotIn("value-never-printed", doctor.stdout)  # names only, never a value
+        with open(os.path.join(self.project, names.CONFIG_NAME), "w") as handle:
+            json.dump(self.config, handle)
+        both = self.tool("hooks.py", "--doctor").stdout
+        self.assertIn("\nnote: .gh-issues-manager.json also exists and is ignored.\n", both)
+        self.assertIn("config: %s\n" % os.path.join(self.project, names.CONFIG_NAME), both)
+        self.assertIn("result: the hooks can show the brief", both)
+
+    def test_doctor_has_no_earlier_name_note_in_a_current_setup(self):
+        self.ready()
+        doctor = self.tool("hooks.py", "--doctor").stdout
+        self.assertNotIn("note: ", doctor)
+        self.assertNotIn("environment: ", doctor)
+        self.assertNotIn("before the rename", doctor)
 
     def test_run_hook_reads_the_earlier_budget_name_as_digits_only(self):
         self.ready()

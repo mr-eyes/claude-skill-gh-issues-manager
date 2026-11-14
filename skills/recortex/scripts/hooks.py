@@ -466,6 +466,34 @@ def lock_lines(repo, active, problems):
           "two seconds" % (claim, age))
 
 
+def earlier_name_lines(config):
+    """For --doctor: notes on the names from before the rename that are in use. Only file, folder and variable names
+    from names.py and paths are printed, never a variable's value. They are notes, never problems."""
+    path = config.get("_path")
+    root = recortex.project_root()
+    lines = []
+    if path and not names.env("CONFIG"):
+        if os.path.basename(path) == names.OLD_CONFIG_NAME:
+            lines.append("note: this is the file name from before the rename; it is read as before. Rename it to %s "
+                         "once everyone on the project has %s 0.5.0 or later." % (names.CONFIG_NAME, names.NAME))
+        elif os.path.lexists(os.path.join(root, names.OLD_CONFIG_NAME)):
+            lines.append("note: %s also exists and is ignored." % names.OLD_CONFIG_NAME)
+    for variable in names.VARIABLES:
+        new, old = names.ENV_PREFIX + variable, names.OLD_ENV_PREFIX + variable
+        source = names.env_source(variable)
+        if source == "old":
+            lines.append("environment: %s is set and read (earlier name; %s is not set)" % (old, new))
+        elif source == "both":
+            lines.append("environment: %s and %s are both set; %s is used" % (old, new, new))
+    return lines
+
+
+def top_note(path):
+    """For the storage line of --doctor: whether a top folder has the name from before the rename."""
+    return " (the folder name from before the rename, used in place)" if os.path.basename(path) == names.OLD_NAME \
+        else ""
+
+
 def doctor():
     """Print what the hooks depend on. Returns 1 when something keeps the brief from being shown."""
     import shutil
@@ -476,6 +504,8 @@ def doctor():
         print("config: unreadable (%s)" % error)
         return 1
     print("config: %s" % (config.get("_path") or "none found at the project root (%s)" % recortex.project_root()))
+    for line in earlier_name_lines(config):
+        print(line)
     repo, hub = config.get("repo"), config.get("hub")
     print("repository: %s   hub: %s" % (repo or "not set", hub if hub is not None else "not set"))
     if not config.get("_path"):
@@ -486,15 +516,21 @@ def doctor():
         return 1
     trusted = repo.lower() in recortex.trusted_repos()
     allowed = sorted(recortex.allowed_users(repo))
-    print("trusted: %s (trusted list: %s; RECORTEX_TRUSTED_REPOS %s); allowed authors: %s"
-          % ("yes" if trusted else "no", recortex.trusted_file(), "set" if names.env("TRUSTED_REPOS") else "not set",
-             ", ".join(allowed) or "none"))
+    variable = (names.OLD_ENV_PREFIX if names.env_source("TRUSTED_REPOS") == "old" else names.ENV_PREFIX) + \
+        "TRUSTED_REPOS"
+    sources = recortex.trusted_sources(repo)
+    print("trusted: %s (trusted lists read: %s; %s %s%s); allowed authors: %s"
+          % ("yes" if trusted else "no", ", ".join(path + ("" if os.path.lexists(path) else " (missing)")
+                                                   for path in recortex.trusted_files()),
+             variable, "set" if names.env("TRUSTED_REPOS") else "not set",
+             "; listed in %s" % ", ".join(sources) if sources else "", ", ".join(allowed) or "none"))
     if not trusted:
         problems.append("the repository is not trusted, so the hooks stay silent")
     gh = names.env("GH") or shutil.which("gh")
     print("gh: %s" % (gh.split()[0] if gh else "not found on PATH"))
-    print("storage: index under %s, state and key under %s; hooks and terminal scripts resolve the same folders "
-          "(CLAUDE_PLUGIN_DATA is not used)%s" % (storage.cache_top(), storage.state_top(for_key=True),
+    print("storage: index under %s%s, state and key under %s%s; hooks and terminal scripts resolve the same folders "
+          "(CLAUDE_PLUGIN_DATA is not used)%s" % (storage.cache_top(), top_note(storage.cache_top()),
+                                                 storage.state_top(for_key=True), top_note(storage.state_top(True)),
                                                  "; RECORTEX_TESTING and RECORTEX_DATA_HOME are set (for tests only): index and state under %s"
                                                  % storage.test_home() if storage.test_home() else ""))
     name = storage.repo_folder(repo)
