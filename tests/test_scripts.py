@@ -4411,6 +4411,107 @@ class EarlierNameTests(RecordSandbox):
         os.unlink(earlier)  # without it the project gets the line: the file was the reason
         self.assertIn("this project has no record yet", self.hook("session-start", env={"CLAUDE_PROJECT_DIR": root}).stdout)
 
+    def xdg_storage(self, cache=(), state=()):
+        """Storage under the XDG folders instead of the test folder; `cache` and `state` name the top folders to make
+        first, each as (name, mode)."""
+        del self.env["RECORTEX_DATA_HOME"]
+        tops = {}
+        for base, made in (("xdg-cache", cache), ("xdg-state", state)):
+            os.makedirs(os.path.join(self.dir, base), mode=0o700, exist_ok=True)
+            for name, mode in made:
+                path = os.path.join(self.dir, base, name)
+                os.makedirs(path)
+                os.chmod(path, mode)
+                tops[(base, name)] = path
+        return tops
+
+    def tops_under(self, base):
+        return sorted(os.listdir(os.path.join(self.dir, base)))
+
+    def test_storage_folders_of_the_earlier_name_are_used_in_place(self):
+        self.xdg_storage(cache=[(names.OLD_NAME, 0o700)], state=[(names.OLD_NAME, 0o700)])
+        self.ready()  # what an earlier version left: an index and a key under the earlier names
+        index_file = os.path.join(self.dir, "xdg-cache", names.OLD_NAME, "private", "example-org__tinycsv",
+                                  "index.sqlite")
+        self.assertTrue(os.path.isfile(index_file))
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-state", names.OLD_NAME, "private", "key")))
+        self.add_comment(9800, 6, EVENT_COMMENTS["failure"], "2026-04-05T10:00:00Z")
+        before = len(self.repo()["log"])
+        session = self.hook("session-start").stdout
+        self.assertIn("(read from GitHub just now)", session)
+        self.assertNotIn("building the local index", session)
+        listing = [" ".join(c) for c in self.repo()["log"][before:] if "issues?state=all" in " ".join(c)]
+        self.assertIn("since=", listing[0])  # an incremental sync of the same index, not a rebuild
+        log = os.path.join(os.path.dirname(index_file), "sync.log")
+        self.assertNotIn("refused", recortex.read_text(log) if os.path.exists(log) else "")
+        self.assertEqual(["failure"], [e["type"] for e in self.query("timeline", "--issue", "6", "--type", "failure")])
+        for base in ("xdg-cache", "xdg-state"):
+            self.assertEqual([names.OLD_NAME], self.tops_under(base), base)  # nothing made under the current name
+
+    def test_storage_folders_of_the_current_name_win_over_the_earlier_ones(self):
+        tops = self.xdg_storage(cache=[(names.OLD_NAME, 0o700), (names.NAME, 0o700)],
+                                state=[(names.OLD_NAME, 0o700), (names.NAME, 0o700)])
+        for base in ("xdg-cache", "xdg-state"):  # an earlier index and key that cannot even be opened
+            private = os.path.join(tops[(base, names.OLD_NAME)], "private")
+            os.makedirs(os.path.join(private, "example-org__tinycsv"), mode=0o700)
+            os.chmod(private, 0o700)
+            for path in (os.path.join(private, "key"), os.path.join(private, "example-org__tinycsv", "index.sqlite")):
+                with open(path, "w") as handle:
+                    handle.write("not readable\n")
+                os.chmod(path, 0)
+        self.ready()
+        self.assertIn("**Current focus:** Release 0.3.0", self.hook("session-start").stdout)
+        self.assertTrue(os.path.isfile(os.path.join(tops[("xdg-cache", names.NAME)], "private", "example-org__tinycsv",
+                                                    "index.sqlite")))
+        self.assertTrue(os.path.isfile(os.path.join(tops[("xdg-state", names.NAME)], "private", "key")))
+
+    def test_only_folders_of_the_current_name_are_made(self):
+        self.xdg_storage()
+        self.ready()
+        self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
+        for base in ("xdg-cache", "xdg-state"):
+            self.assertEqual([names.NAME], self.tops_under(base), base)
+
+    def test_a_symlink_at_the_current_name_is_refused_and_the_earlier_folder_not_read(self):
+        self.xdg_storage(cache=[(names.OLD_NAME, 0o700)], state=[(names.OLD_NAME, 0o700)])
+        self.ready()
+        elsewhere = os.path.join(self.dir, "elsewhere")
+        os.makedirs(elsewhere, mode=0o700)
+        refused = ["recortex: record brief not shown: the local storage was refused (a storage folder or file is a "
+                   "symlink). Run hooks.py --doctor."]
+        for base in ("xdg-cache", "xdg-state"):
+            link = os.path.join(self.dir, base, names.NAME)
+            os.symlink(elsewhere, link)
+            earlier = os.path.join(self.dir, base, names.OLD_NAME)
+            before = sorted(os.walk(earlier))
+            self.assertEqual(refused, self.hook("session-start").stdout.strip().split("\n"), base)
+            self.assertEqual("", self.hook("pre-compact").stdout, base)
+            self.assertEqual(before, sorted(os.walk(earlier)), base)
+            self.assertEqual([], os.listdir(elsewhere), base)
+            os.unlink(link)
+        self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
+
+    def test_the_key_under_the_earlier_name_marks_an_index_under_the_current_name(self):
+        self.xdg_storage(state=[(names.OLD_NAME, 0o700)])  # each top folder is chosen by itself
+        self.ready()
+        self.assertEqual([names.NAME], self.tops_under("xdg-cache"))
+        self.assertEqual([names.OLD_NAME], self.tops_under("xdg-state"))
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "xdg-state", names.OLD_NAME, "private", "key")))
+        session = self.hook("session-start").stdout
+        self.assertIn("(read from GitHub just now)", session)
+        self.assertIn("**Current focus:** Release 0.3.0", session)
+
+    def test_storage_folders_of_the_earlier_name_get_the_same_checks(self):
+        tops = self.xdg_storage(cache=[(names.OLD_NAME, 0o775)], state=[(names.OLD_NAME, 0o775)])
+        self.ready()
+        self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
+        for path in tops.values():
+            self.assertEqual(0o700, os.stat(path).st_mode & 0o777, path)  # a loose top folder is tightened
+        os.chmod(os.path.join(tops[("xdg-cache", names.OLD_NAME)], "private"), 0o750)
+        self.assertIn("record brief not shown: the local storage was refused (a storage folder or file has permissions "
+                      "for group or others)", self.hook("session-start").stdout)
+        self.assertIn("chmod 700", self.tool("hooks.py", "--doctor").stdout)
+
     def test_run_hook_reads_the_earlier_budget_name_as_digits_only(self):
         self.ready()
         slow = {"FAKE_GH_RESUME_SLEEP": "3", "RECORTEX_HOOK_TIMEOUT": None, "GHIM_HOOK_TIMEOUT": "2"}

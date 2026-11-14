@@ -10,10 +10,20 @@ for hooks but not for the session's Bash tool, so it would split the storage
 between the two. An index left in an older plugin data folder is ignored; the
 first sync builds a new one.
 
+The plugin had another name before version 0.5.0 (names.OLD_NAME).
+Each top folder is chosen by itself: the folder of the current name when
+anything is at that path, or when nothing is at the path of the earlier name;
+else the folder of the earlier name, used in place and never moved. An old and
+a new version of the plugin on one machine then share one index, one lock and
+one key, and the index keeps its mark, which covers its path. Whatever is
+chosen gets every check below; a symlink or a file at the current name is
+chosen and refused, so the earlier folder is never a way around a refused one.
+
 RECORTEX_DATA_HOME is for tests only, and is read only when RECORTEX_TESTING=1
 is also set: the index and the state then go to $RECORTEX_DATA_HOME/recortex (the
-key stays under XDG_STATE_HOME). Like every top folder, only the folder the
-plugin names, recortex, is created or tightened.
+key stays under XDG_STATE_HOME), with no earlier name. Like every top folder,
+only the folder the plugin names (recortex, or the earlier name where that one
+is used) is created or tightened, never a folder above it.
 
 Inside the top folder the plugin keeps everything in a private folder it creates
 and controls, `private/`, with mode 0700:
@@ -72,18 +82,26 @@ def test_home():
     return os.path.join(value, "recortex")
 
 
+def choose_top(base):
+    """<base>/recortex, or <base>/<names.OLD_NAME> when nothing is at the first path and something is at the
+    second. os.path.lexists, so that a symlink or a file at the current name is chosen, and then refused by
+    check_top."""
+    current, earlier = os.path.join(base, names.NAME), os.path.join(base, names.OLD_NAME)
+    return current if os.path.lexists(current) or not os.path.lexists(earlier) else earlier
+
+
 def cache_top():
-    """The top folder of the index: $XDG_CACHE_HOME/recortex, the same for hooks and the terminal."""
-    return test_home() or os.path.join(_env_dir("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache")),
-                                       "recortex")
+    """The top folder of the index: $XDG_CACHE_HOME/recortex (or the earlier name, see above), the same for hooks
+    and the terminal."""
+    return test_home() or choose_top(_env_dir("XDG_CACHE_HOME", os.path.join(os.path.expanduser("~"), ".cache")))
 
 
 def state_top(for_key=False):
-    """The top folder of the state: $XDG_STATE_HOME/recortex. The key always lives there."""
+    """The top folder of the state: $XDG_STATE_HOME/recortex (or the earlier name, see above). The key always lives
+    there."""
     if not for_key and test_home():
         return test_home()
-    return os.path.join(_env_dir("XDG_STATE_HOME", os.path.join(os.path.expanduser("~"), ".local", "state")),
-                        "recortex")
+    return choose_top(_env_dir("XDG_STATE_HOME", os.path.join(os.path.expanduser("~"), ".local", "state")))
 
 
 def repo_folder(repo):
