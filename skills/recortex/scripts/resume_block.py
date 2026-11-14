@@ -49,7 +49,7 @@ def show(args, config):
         if not args.trust_once:
             print("recortex: %s is not in your trusted repositories (%s), so the resume block of hub %s "
                   "was not read. The user can add the repository to that file, or run this command with "
-                  "--trust-once." % (repo, recortex.trusted_file(), where))
+                  "--trust-once." % (repo, recortex.trusted_target(), where))
             return 0
         trusted = dict(trusted)
         trusted[repo.lower()] = set()
@@ -142,11 +142,11 @@ def update(args, config):
             me = ""
         if not allowed:
             print("WARNING: %s is not in your trusted repositories (%s), so `show` and the hook will not print "
-                  "this resume comment until the user trusts the repository." % (repo, recortex.trusted_file()))
+                  "this resume comment until the user trusts the repository." % (repo, recortex.trusted_target()))
         elif not me or me.lower() not in allowed:
             print("WARNING: this comment is posted as %s, which is not in the allowed accounts for %s (%s). "
                   "`show` and the hook will ignore it until the user adds that login to %s."
-                  % (me or "an unknown login", repo, ", ".join(sorted(allowed)), recortex.trusted_file()))
+                  % (me or "an unknown login", repo, ", ".join(sorted(allowed)), recortex.trusted_target()))
     if args.dry_run:
         print("would run: " + recortex.show_command(command, "new resume comment from stdin, %d characters" % len(comment)))
         print("would read back: gh api repos/%s/issues/comments/<id> and compare" % repo)

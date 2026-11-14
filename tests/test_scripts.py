@@ -4437,6 +4437,12 @@ class EarlierNameTests(RecordSandbox):
                                       os.path.join(self.drafts, "result-speed-1.md"), "--dry-run"])):
             result = self.tool(script, *args)
             self.assertIn("config: %s  repo: %s\n" % (config, REPO), result.stdout, (script, result.stderr))
+        with open(config, "w") as handle:
+            json.dump({"repo": REPO, "profiles": ["software", "research"]}, handle)  # no hub: the message names this file
+        missing = self.tool("resume_block.py", "show")
+        self.assertNotEqual(0, missing.returncode)
+        self.assertIn('set "hub" in %s' % names.OLD_CONFIG_NAME, missing.stderr)
+        self.assertNotIn(names.CONFIG_NAME, missing.stderr)
 
     def test_the_current_file_name_wins_over_the_earlier_one(self):
         self.ready()
@@ -4584,6 +4590,8 @@ class EarlierNameTests(RecordSandbox):
             handle.write("%s alice\n" % REPO)
         self.assertNotEqual("", self.hook("pre-compact", env=defaults).stdout)  # the earlier list alone
         self.assertIn("allowed authors: alice, example-org\n", self.tool("hooks.py", "--doctor", env=defaults).stdout)
+        unlisted = self.tool("resume_block.py", "show", "--repo", "example-org/unlisted", "--hub", "4", env=defaults)
+        self.assertIn("is not in your trusted repositories (%s)" % lists[names.OLD_NAME], unlisted.stdout)
         os.makedirs(os.path.dirname(lists[names.NAME]))
         with open(lists[names.NAME], "w") as handle:
             handle.write("example-org/other bob\n%s carol\n" % REPO)

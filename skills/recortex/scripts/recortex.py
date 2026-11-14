@@ -119,14 +119,6 @@ def config_home():
     return value if value and os.path.isabs(value) else os.path.join(os.path.expanduser("~"), ".config")
 
 
-def trusted_file():
-    """RECORTEX_TRUSTED_FILE when it is an absolute path, else <config home>/recortex/trusted-repos."""
-    env = names.env("TRUSTED_FILE")
-    if env and os.path.isabs(env):
-        return env
-    return os.path.join(config_home(), names.NAME, "trusted-repos")
-
-
 def trusted_files():
     """The trusted lists that are read: RECORTEX_TRUSTED_FILE alone when it is an absolute path (neither default list
     is then read); else <config home>/recortex/trusted-repos, then the list under the folder name from before the
@@ -318,12 +310,17 @@ def describe(config, repo):
     return "config: %s  repo: %s" % (config.get("_path") or "none (repository given on the command line or in the manifest)", repo)
 
 
+def config_name(cfg):
+    """For messages: the name of the configuration file that was read, else the current name."""
+    return os.path.basename(cfg.get("_path") or "") or CONFIG_NAME
+
+
 def resolve_repo(cli_value, cfg):
     repo = cli_value or cfg.get("repo")
     if not valid_repo(repo):
         sys.exit(
             "error: no repository. Pass --repo owner/name or set \"repo\" in %s"
-            % CONFIG_NAME
+            % config_name(cfg)
         )
     return repo
 
@@ -333,7 +330,7 @@ def resolve_hub(cli_value, cfg):
     if not isinstance(hub, int) or hub < 1:
         sys.exit(
             "error: no hub issue number. Pass --hub N or set \"hub\" in %s"
-            % CONFIG_NAME
+            % config_name(cfg)
         )
     return hub
 

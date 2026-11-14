@@ -412,7 +412,7 @@ def print_all():
     print(recortex.describe(config, repo))
     if repo.lower() not in recortex.trusted_repos():
         print("note: %s is not in your trusted repositories (%s), so the hooks print nothing for it; the payloads "
-              "below show what they would print once it is trusted." % (repo, recortex.trusted_file()))
+              "below show what they would print once it is trusted." % (repo, recortex.trusted_target()))
     try:
         db = index.connect(repo, create=False)
     except storage.StorageError as error:

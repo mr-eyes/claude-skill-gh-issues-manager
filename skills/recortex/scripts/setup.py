@@ -337,7 +337,7 @@ def merge_profiles(existing, new):
     return out, added
 
 
-def check_existing(existing):
+def check_existing(existing, name=recortex.CONFIG_NAME):
     """The values of an existing setup that setup.py merges and prints must fit the same patterns as the answers."""
     problems = []
     if "repo" in existing and not recortex.valid_repo(existing["repo"]):
@@ -360,12 +360,13 @@ def check_existing(existing):
         problems.append("profiles (shipped profile names, or entries with valid sections)")
     if problems:
         raise AnswerError("the existing %s has values that do not fit: %s. Fix them by hand, then run again"
-                          % (recortex.CONFIG_NAME, ", ".join(problems)))
+                          % (name, ", ".join(problems)))
 
 
-def new_config(existing, answers):
-    """The merged setup. Raises AnswerError when the existing setup or the result does not fit."""
-    check_existing(existing)
+def new_config(existing, answers, name=recortex.CONFIG_NAME):
+    """The merged setup. Raises AnswerError when the existing setup or the result does not fit. `name` is the file the
+    existing setup was read from, for the message."""
+    check_existing(existing, name)
     config = {k: v for k, v in existing.items() if not k.startswith("_")}
     config["repo"] = answers["repo"]
     entries = [profile_entry(item) for item in answers["deliverables"]]
@@ -629,7 +630,7 @@ def apply(answers, root, dry, drafts):
             raise SystemExit("error: %s already names %s; the answers name %s. Change the setup by hand if the record "
                              "moved" % (config_path, existing["repo"], answers["repo"]))
     try:
-        config, added = new_config(existing, answers)
+        config, added = new_config(existing, answers, os.path.basename(config_path))
     except AnswerError as error:
         raise SystemExit("error: %s" % error)
     print("profiles: %s" % ", ".join(recortex.profile_names(config["profiles"])))
