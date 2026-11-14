@@ -708,7 +708,11 @@ def take_lock(repo, budget):
     (kind "not-folder"). The time limits use the monotonic clock. A symlinked or
     foreign lock is refused. Errors of the file system are reported as
     storage.StorageError of kind "lock", and so is a stale lock that LOCK_JUDGED
-    judgments did not remove.
+    judgments did not remove. Three races are accepted (references/hooks-and-index.md):
+    a holder past its window that releases while it is removed, a judge killed
+    holding its claim while several wait on it (likelier with time stamps kept to
+    the second), and a judge held up over two seconds between its last check and
+    the removal.
     """
     path = background_files(repo)["lock"]
     claim = path + ".claim"
