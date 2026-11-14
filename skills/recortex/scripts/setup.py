@@ -566,8 +566,9 @@ def write_text(path, text, dry, what, base):
 
 
 def add_trusted(repo):
-    """Add a repository to the user's trusted list through a temporary file; the file keeps its mode."""
-    path = recortex.trusted_file()
+    """Add a repository to the user's trusted list through a temporary file; the file keeps its mode. The list is
+    the one recortex.trusted_target() names: an existing list of the earlier name is added to, not copied."""
+    path = recortex.trusted_target()
     if os.path.islink(path) or os.path.lexists(path) and not os.path.isfile(path):
         raise SystemExit("error: %s is a symlink or not a plain file; add %s to it by hand" % (path, repo))
     folder = os.path.dirname(os.path.abspath(path))
@@ -681,17 +682,17 @@ def apply(answers, root, dry, drafts):
                 print("  | %s | none yet | `%s` |   (%s)" % (heading, label, title))
 
     if answers["trust"]:
-        trusted = recortex.trusted_file()
+        trusted = recortex.trusted_target()
         present = answers["repo"].lower() in recortex.trusted_repos()
         if present:
-            print("trusted: %s is already in %s" % (answers["repo"], trusted))
+            print("trusted: %s is already in %s" % (answers["repo"], ", ".join(recortex.trusted_sources(answers["repo"]))))
         elif dry:
             print("would add: %s to %s   # the user agreed" % (answers["repo"], trusted))
         else:
             print("added: %s to %s" % (answers["repo"], add_trusted(answers["repo"])))
     else:
         print("trusted: not changed; the hooks stay silent until the user adds %s to %s" % (answers["repo"],
-                                                                                          recortex.trusted_file()))
+                                                                                          recortex.trusted_target()))
 
     if answers["triage_workflow"] and answers["record"] != "this":
         print("not written: the triage labeler runs in the repository that holds the issues (%s), not in this project; "

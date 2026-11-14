@@ -124,31 +124,82 @@ def trusted_file():
     env = names.env("TRUSTED_FILE")
     if env and os.path.isabs(env):
         return env
-    return os.path.join(config_home(), "recortex", "trusted-repos")
+    return os.path.join(config_home(), names.NAME, "trusted-repos")
 
 
-def trusted_repos():
-    """Repositories the user has trusted, as {"owner/name": {extra allowed logins}}.
+def trusted_files():
+    """The trusted lists that are read: RECORTEX_TRUSTED_FILE alone when it is an absolute path (neither default list
+    is then read); else <config home>/recortex/trusted-repos, then the list under the folder name from before the
+    rename (names.OLD_NAME). Both default lists belong to the user, and a repository listed in either is trusted."""
+    env = names.env("TRUSTED_FILE")
+    if env and os.path.isabs(env):
+        return [env]
+    return [os.path.join(config_home(), name, "trusted-repos") for name in (names.NAME, names.OLD_NAME)]
 
-    Read from the user-level file (one "owner/name [login ...]" per line, # for
-    comments) and from RECORTEX_TRUSTED_REPOS (comma-separated owner/name). Both
-    belong to the user; nothing inside a project can add to this list.
-    Keys and logins are lowercase.
-    """
+
+def trusted_target():
+    """The trusted list a new entry goes to: RECORTEX_TRUSTED_FILE when it is set; else the current default list when
+    something is there, else the earlier one when something is there, else the current default list (made new)."""
+    files = trusted_files()
+    return next((path for path in files if os.path.lexists(path)), files[0])
+
+
+def settings_file():
+    """The user's settings (`"discovery": false`): <config home>/recortex/settings.json, or the file under the folder
+    name from before the rename when only that one is there."""
+    current, earlier = (os.path.join(config_home(), name, "settings.json") for name in (names.NAME, names.OLD_NAME))
+    return earlier if os.path.lexists(earlier) and not os.path.lexists(current) else current
+
+
+def read_trusted_file(path):
+    """{"owner/name": {logins}} from one trusted list (one "owner/name [login ...]" per line, # for comments); empty
+    when the file cannot be read. Keys and logins are lowercase."""
     trusted = {}
     try:
-        with open(trusted_file(), encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             for line in handle:
                 parts = line.split("#", 1)[0].split()
                 if parts and valid_repo(parts[0]):
                     trusted.setdefault(parts[0].lower(), set()).update(p.lower() for p in parts[1:])
     except OSError:
         pass
+    return trusted
+
+
+def trusted_from_variable():
+    """The repositories in RECORTEX_TRUSTED_REPOS (comma-separated owner/name), lowercase."""
+    found = set()
     for name in names.env("TRUSTED_REPOS", "").split(","):
         name = name.strip()
         if valid_repo(name):  # checked before lowercase, which turns the Kelvin sign into k
-            trusted.setdefault(name.lower(), set())
+            found.add(name.lower())
+    return found
+
+
+def trusted_repos():
+    """Repositories the user has trusted, as {"owner/name": {extra allowed logins}}.
+
+    Read from every list of trusted_files() and from RECORTEX_TRUSTED_REPOS. All
+    belong to the user; nothing inside a project can add to them. The logins
+    listed for one repository in two lists are merged. Keys and logins are
+    lowercase.
+    """
+    trusted = {}
+    for path in trusted_files():
+        for repo, logins in read_trusted_file(path).items():
+            trusted.setdefault(repo, set()).update(logins)
+    for repo in trusted_from_variable():
+        trusted.setdefault(repo, set())
     return trusted
+
+
+def trusted_sources(repo):
+    """For --doctor and setup: the trusted lists that list `repo`, and the name of the variable when it lists it."""
+    found = [path for path in trusted_files() if repo.lower() in read_trusted_file(path)]
+    if repo.lower() in trusted_from_variable():
+        old = names.env_source("TRUSTED_REPOS") == "old"
+        found.append((names.OLD_ENV_PREFIX if old else names.ENV_PREFIX) + "TRUSTED_REPOS")
+    return found
 
 
 def allowed_users(repo, trusted=None):

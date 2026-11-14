@@ -4512,6 +4512,95 @@ class EarlierNameTests(RecordSandbox):
                       "for group or others)", self.hook("session-start").stdout)
         self.assertIn("chmod 700", self.tool("hooks.py", "--doctor").stdout)
 
+    def test_both_trusted_lists_are_read(self):
+        self.ready()
+        home = os.path.join(self.dir, "xdg-config")
+        lists = {name: os.path.join(home, name, "trusted-repos") for name in (names.NAME, names.OLD_NAME)}
+        defaults = {"RECORTEX_TRUSTED_FILE": None}
+        os.makedirs(os.path.dirname(lists[names.OLD_NAME]))
+        with open(lists[names.OLD_NAME], "w") as handle:
+            handle.write("%s alice\n" % REPO)
+        self.assertNotEqual("", self.hook("pre-compact", env=defaults).stdout)  # the earlier list alone
+        self.assertIn("allowed authors: alice, example-org\n", self.tool("hooks.py", "--doctor", env=defaults).stdout)
+        os.makedirs(os.path.dirname(lists[names.NAME]))
+        with open(lists[names.NAME], "w") as handle:
+            handle.write("example-org/other bob\n%s carol\n" % REPO)
+        self.assertNotEqual("", self.hook("pre-compact", env=defaults).stdout)
+        self.assertIn("allowed authors: alice, carol, example-org\n", self.tool("hooks.py", "--doctor", env=defaults).stdout)
+        from unittest import mock
+        with mock.patch.dict(os.environ, environment_for(os.environ, {"XDG_CONFIG_HOME": home}), clear=True):
+            self.assertEqual({REPO: {"alice", "carol"}, "example-org/other": {"bob"}}, recortex.trusted_repos())
+            os.environ["RECORTEX_TRUSTED_FILE"] = self.trusted
+            self.assertEqual({REPO: {"octo-dev"}}, recortex.trusted_repos())  # an override is the only list read
+        absent = {"RECORTEX_TRUSTED_FILE": os.path.join(self.dir, "absent")}
+        self.assertEqual("", self.hook("pre-compact", env=absent).stdout)
+        self.assertEqual("", self.hook("pre-compact", env={"RECORTEX_TRUSTED_FILE": None,
+                                                           "GHIM_TRUSTED_FILE": absent["RECORTEX_TRUSTED_FILE"]}).stdout)
+
+    def test_a_new_trusted_entry_goes_to_the_list_that_is_there(self):
+        sys.path.insert(0, SCRIPTS)
+        import setup
+        from unittest import mock
+
+        def lists(case):
+            home = os.path.join(self.dir, "config-" + case)
+            return home, {name: os.path.join(home, name, "trusted-repos") for name in (names.NAME, names.OLD_NAME)}
+
+        def add(home, extra=None):
+            with mock.patch.dict(os.environ, environment_for(os.environ, {"XDG_CONFIG_HOME": home}, extra), clear=True):
+                return setup.add_trusted(REPO)
+
+        def plant(path, text="example-org/other\n"):
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as handle:
+                handle.write(text)
+
+        home, files = lists("neither")
+        self.assertEqual(files[names.NAME], add(home))
+        self.assertEqual(REPO + "\n", recortex.read_text(files[names.NAME]))
+        self.assertFalse(os.path.lexists(os.path.dirname(files[names.OLD_NAME])))
+        home, files = lists("earlier")
+        plant(files[names.OLD_NAME])
+        self.assertEqual(files[names.OLD_NAME], add(home))
+        self.assertEqual("example-org/other\n%s\n" % REPO, recortex.read_text(files[names.OLD_NAME]))
+        self.assertFalse(os.path.lexists(os.path.dirname(files[names.NAME])))
+        home, files = lists("both")
+        plant(files[names.OLD_NAME])
+        plant(files[names.NAME], "")
+        self.assertEqual(files[names.NAME], add(home))
+        self.assertEqual(REPO + "\n", recortex.read_text(files[names.NAME]))
+        self.assertEqual("example-org/other\n", recortex.read_text(files[names.OLD_NAME]))
+        victim = self.write("victim", "keep\n")
+        for case, linked in (("link-current", names.NAME), ("link-earlier", names.OLD_NAME)):
+            home, files = lists(case)
+            os.makedirs(os.path.dirname(files[linked]))
+            os.symlink(victim, files[linked])
+            with self.assertRaises(SystemExit):
+                add(home)
+            self.assertEqual([], [n for n in (names.NAME, names.OLD_NAME) if n != linked and os.path.lexists(
+                os.path.join(home, n))], case)
+        override = os.path.join(self.dir, "override-link")
+        os.symlink(victim, override)
+        with self.assertRaises(SystemExit):
+            add(lists("override")[0], {"GHIM_TRUSTED_FILE": override})
+        self.assertEqual("keep\n", recortex.read_text(victim))
+
+    def test_the_discovery_setting_under_the_earlier_folder_name(self):
+        root = os.path.join(self.dir, "checkout")
+        subprocess.run(["git", "init", "-q", root], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "remote", "add", "origin", "https://github.com/example-org/x.git"],
+                       check=True, capture_output=True)
+        home = os.path.join(self.dir, "xdg-config")
+        for name, text in ((names.OLD_NAME, '{"discovery": false}'),):
+            os.makedirs(os.path.join(home, name))
+            with open(os.path.join(home, name, "settings.json"), "w") as handle:
+                handle.write(text)
+        self.assertEqual("", self.hook("session-start", env={"CLAUDE_PROJECT_DIR": root}).stdout)
+        os.makedirs(os.path.join(home, names.NAME))
+        with open(os.path.join(home, names.NAME, "settings.json"), "w") as handle:
+            handle.write("{}")  # the current file is read, and it does not turn the line off
+        self.assertIn("this project has no record yet", self.hook("session-start", env={"CLAUDE_PROJECT_DIR": root}).stdout)
+
     def test_run_hook_reads_the_earlier_budget_name_as_digits_only(self):
         self.ready()
         slow = {"FAKE_GH_RESUME_SLEEP": "3", "RECORTEX_HOOK_TIMEOUT": None, "GHIM_HOOK_TIMEOUT": "2"}

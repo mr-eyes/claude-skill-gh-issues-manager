@@ -19,7 +19,8 @@ when there is no index yet, or on any error, with two exceptions of fixed
 wording: at session start in the top folder of a git checkout with a GitHub
 remote and no .recortex.json, one line offers to set up the record,
 once per project (off with RECORTEX_DISCOVERY=0 or "discovery": false in
-~/.config/recortex/settings.json); and in a project that is set up and
+~/.config/recortex/settings.json, or the file of the name from before 0.5.0
+when only that one is there); and in a project that is set up and
 trusted, one line says why the brief is not shown. Nothing here writes to GitHub.
 
 --print shows the four payloads and their sizes, for the user to check.
@@ -171,7 +172,7 @@ def discovery_off():
     if names.env("DISCOVERY", "").strip().lower() in ("0", "off", "no", "false"):
         return True
     try:
-        with open(os.path.join(recortex.config_home(), "recortex", "settings.json"), encoding="utf-8") as handle:
+        with open(recortex.settings_file(), encoding="utf-8") as handle:
             return json.load(handle).get("discovery") is False
     except (OSError, ValueError, AttributeError):
         return False
