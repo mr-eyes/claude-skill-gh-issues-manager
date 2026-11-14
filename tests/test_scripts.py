@@ -3279,6 +3279,32 @@ class RecoveryTests(RecordSandbox):
         self.assertFalse(os.path.lexists(claim))
         self.assertEqual(os.getpid(), json.loads(ghim.read_text(lock))["pid"])
 
+    def test_the_wait_for_the_hand_over_is_measured_on_the_monotonic_clock(self):
+        import types
+        import index as index_module
+        lock = self.in_process()
+        self.addCleanup(lambda: os.path.lexists(lock) and os.unlink(lock))  # before the sandbox cleanup
+        wall, naps = [time.time()], []
+
+        def wall_clock():  # a wall clock that is set forward by a second at every reading
+            wall[0] += 1.0
+            return wall[0]
+
+        def sleep(seconds):  # nothing waits: the monotonic clock moves with the naps only
+            naps.append(seconds)
+            if len(naps) == 20:  # two seconds in: the hook writes this process's pid into the lock
+                index_module.hand_lock(REPO, os.getpid(), 300)
+            if len(naps) > 1000:
+                raise AssertionError("wait_for_lock went on waiting")
+
+        index_module.time = types.SimpleNamespace(time=wall_clock, sleep=sleep, time_ns=time.time_ns,
+                                                  monotonic=lambda: 0.1 * len(naps))
+        try:
+            self.assertTrue(index_module.wait_for_lock(REPO))
+        finally:
+            index_module.time = time
+        self.assertEqual(20, len(naps))
+
     def test_a_claim_that_is_not_a_file_is_refused_at_once(self):
         import index as index_module
         storage_module = sys.modules["storage"]

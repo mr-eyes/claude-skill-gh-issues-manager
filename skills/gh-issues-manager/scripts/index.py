@@ -784,8 +784,8 @@ def hand_lock(repo, pid, budget):
 
 def wait_for_lock(repo, wait=10.0):
     """For a sync started by a hook: True once the hook has written this process's pid into the lock."""
-    end = time.time() + wait
-    while time.time() < end:
+    end = time.monotonic() + wait
+    while time.monotonic() < end:
         data = read_lock(background_files(repo)["lock"])
         if valid_lock(data) and data["pid"] == os.getpid() and data["host"] == HOST:
             return True
