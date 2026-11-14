@@ -11,7 +11,9 @@ claude plugin marketplace update mr-eyes-skills
 claude plugin install recortex@mr-eyes-skills
 ```
 
-The marketplace lists the plugin under its new name and maps the old one to it (`renames` in `marketplace.json`), so Claude Code moves the enabled entry in your settings to `recortex@mr-eyes-skills`. It does not install the new name on its own: between the two commands the plugin is not loaded, and no hook runs. `claude plugin update gh-issues-manager@mr-eyes-skills` fails with "not found" once the marketplace is updated; install the new name instead. Until you update the marketplace you stay on the installed 0.4.x, which keeps working. Run `claude plugin list` afterwards: it shows `recortex@mr-eyes-skills`, version 0.5.0 or later.
+Then start a new session. If the brief and the skill stopped appearing without your doing anything, the marketplace was updated for you: `claude plugin list` no longer shows the plugin, and the second command brings it back. Add `--scope project` or `--scope local` if that is how you installed it.
+
+The marketplace lists the plugin under its new name and maps the old one to it (`renames` in `marketplace.json`), so Claude Code moves the enabled entry in your settings to `recortex@mr-eyes-skills`. It does not install the new name on its own: between the two commands the plugin is not loaded, and no hook runs. `claude plugin update gh-issues-manager@mr-eyes-skills` fails with "not found" once the marketplace is updated; install the new name instead. Until you update the marketplace you stay on the installed 0.4.x, which keeps working. Run `claude plugin list` afterwards: it shows `recortex@mr-eyes-skills`, version 0.5.0 or later. The old plugin folder, `~/.claude/plugins/cache/mr-eyes-skills/gh-issues-manager/`, is left behind and can be deleted.
 
 A copy of the plugin installed another way (a folder under `~/.claude/skills/` with hooks from `templates/settings-hook-snippet.json`, or a second plugin entry) stays as it is. Copy the new `skills/recortex` folder in, remove the old folder, and change the four hook commands to `$HOME/.claude/skills/recortex/scripts/`. Two copies enabled at once print two briefs, so disable or uninstall the other one.
 
@@ -36,14 +38,14 @@ The session-start and subagent briefs carry one fixed sentence that the skill wa
 
 ## What to change by hand
 
-- Names that point at the plugin's parts: the agents are now `recortex:record-drafter`, `recortex:record-reviewer` and `recortex:record-auditor`, and the skill is `/recortex:recortex` (plugin) or `/recortex` (folder install). Edit permission rules, your own agents and notes that use the old prefix; there is no alias for it.
+- Names that point at the plugin's parts: the agents are now `recortex:record-drafter`, `recortex:record-reviewer` and `recortex:record-auditor`, and the skill is `/recortex:recortex` (plugin) or `/recortex` (folder install). Edit permission rules, your own agents and notes that use the old prefix; there is no alias for it. Permission rules that hold the plugin's path (under `~/.claude/plugins/cache/` or a folder install's folder) need the new path in the same way.
 - A project's CLAUDE.md snippet that names the `gh-issues-manager` skill: replace the name. `setup.py apply` does not rewrite it and prints a note when it sees it.
 - A folder install's folder and hook paths (see above).
 
 ## Optional renames
 
-- The configuration file: rename `.gh-issues-manager.json` to `.recortex.json` once everyone on the project has recortex 0.5.0 or later. The file is committed, and a collaborator on 0.4.x cannot read the new name: their hooks would go silent and the setup line would appear.
-- The storage folders, with no session running: delete `~/.cache/gh-issues-manager` (the next session builds a new index under `~/.cache/recortex` in the background), and move `~/.local/state/gh-issues-manager` to `~/.local/state/recortex` to keep the key and the hook state. A key in the earlier state folder also works with an index in the new cache folder.
+- The configuration file: rename `.gh-issues-manager.json` to `.recortex.json` once everyone on the project has recortex 0.5.0 or later. The file is committed, and a collaborator on 0.4.x cannot read the new name: their hooks would go silent and the setup line would appear. A record set up with 0.5.0 gets `.recortex.json` from the start, so collaborators on such a project need 0.5.0 or later too.
+- The storage folders, with no session running and only once no copy of 0.4.x is used on this machine (a folder install or another Claude Code profile would make the earlier folders again with another key, and the two versions would then refuse each other's index): delete `~/.cache/gh-issues-manager` (the next session builds a new index under `~/.cache/recortex` in the background; moving it instead gains nothing, because an index is refused at a path other than the one it was made at), and move `~/.local/state/gh-issues-manager` to `~/.local/state/recortex` to keep the key and the hook state. A key in the earlier state folder also works with an index in the new cache folder.
 - The trusted list and settings: move them to `~/.config/recortex/`. Until then both lists are read, so a repository is no longer trusted only once it is gone from both.
 - Environment variables: rename `GHIM_*` to `RECORTEX_*`.
 - An installed `.github/workflows/ghim-triage.yml` needs nothing; it labels new issues as before.
