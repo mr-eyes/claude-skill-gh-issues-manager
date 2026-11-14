@@ -38,6 +38,7 @@ BUILDING = ("gh-issues-manager: record brief not shown: building the local index
 ALL_LABELS = ["hub", "final-record", "active", "rel:changed", "rel:fixed", "rel:known-issues", "rd:methods",
               "rd:results", "rd:limitations", "topic:reader", "topic:speed"]
 EXAMPLE_CONFIG = {"profiles": ["software", "research"]}
+DEAD_PID = 2 ** 22 + 1000  # above every pid Linux can give (2**22 at most); macOS and the BSDs stop below 100000
 
 
 def codes(findings, level="error"):
@@ -86,7 +87,9 @@ class Sandbox(unittest.TestCase):
     def stop_background(self):
         for lock in self.background_locks():
             try:
-                os.kill(json.loads(ghim.read_text(lock))["pid"], 15)
+                pid = json.loads(ghim.read_text(lock))["pid"]
+                if isinstance(pid, int) and pid not in (os.getpid(), DEAD_PID):
+                    os.kill(pid, 15)
             except (OSError, ValueError, KeyError):
                 pass
 
@@ -2701,9 +2704,9 @@ class RecoveryTests(RecordSandbox):
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
             self.assertNotIn("1; rm", result.stdout + result.stderr)
 
-    def plant_lock(self, lock, pid=4194000):
+    def plant_lock(self, lock, pid=DEAD_PID):
         import index as index_module
-        with open(lock, "w") as handle:  # pid 4194000 does not exist: a stale lock
+        with open(lock, "w") as handle:  # no process has DEAD_PID: a stale lock
             json.dump({"pid": pid, "host": index_module.HOST, "started": time.time(), "budget": 300}, handle)
         os.chmod(lock, 0o600)
 
@@ -3101,7 +3104,7 @@ class RecoveryTests(RecordSandbox):
             os.utime = real
         self.assertEqual("lock", caught.exception.kind)
         self.assertFalse(os.path.lexists(lock + ".claim"))
-        self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+        self.assertEqual(DEAD_PID, json.loads(ghim.read_text(lock))["pid"])  # not removed
 
     def test_a_stale_lock_that_is_never_matched_is_an_error_and_stays(self):
         import index as index_module
@@ -3124,7 +3127,7 @@ class RecoveryTests(RecordSandbox):
             index_module._judge = real
         self.assertEqual("lock", caught.exception.kind)
         self.assertEqual(index_module.LOCK_JUDGED, len(calls))
-        self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+        self.assertEqual(DEAD_PID, json.loads(ghim.read_text(lock))["pid"])  # not removed
         self.assertFalse(os.path.lexists(lock + ".claim"))
 
     def test_a_lock_that_goes_away_before_the_claim_is_not_an_error(self):
@@ -3288,7 +3291,7 @@ class RecoveryTests(RecordSandbox):
             with self.assertRaises(storage_module.StorageError, msg=make.__name__) as caught:
                 index_module.take_lock(REPO, 300)
             self.assertEqual("not-folder", caught.exception.kind, make.__name__)
-            self.assertEqual(4194000, json.loads(ghim.read_text(lock))["pid"])  # not removed
+            self.assertEqual(DEAD_PID, json.loads(ghim.read_text(lock))["pid"])  # not removed
             remove(claim)
 
     def test_a_platform_without_linkat_gives_a_lock_error(self):
@@ -3331,7 +3334,7 @@ class RecoveryTests(RecordSandbox):
         self.plant_lock(lock)
         self.addCleanup(lambda: [os.unlink(p) for p in (claim, lock) if os.path.lexists(p) and not os.path.isdir(p)])
         doctor = self.tool("hooks.py", "--doctor").stdout
-        self.assertIn("sync lock: %s is there but not live: pid 4194000 on this host, started " % lock, doctor)
+        self.assertIn("sync lock: %s is there but not live: pid %d on this host, started " % (lock, DEAD_PID), doctor)
         self.assertNotIn("sync lock claim", doctor)
         self.assertIn("result: the hooks can show the brief", doctor)
         with open(lock, "w") as handle:
@@ -3368,7 +3371,7 @@ class RecoveryTests(RecordSandbox):
     def test_lock_fields_and_hosts(self):
         import index as index_module
         now = time.time()
-        good = {"pid": 4194000, "host": index_module.HOST, "started": now, "budget": 300}
+        good = {"pid": DEAD_PID, "host": index_module.HOST, "started": now, "budget": 300}
         self.assertEqual(good, index_module.valid_lock(dict(good)))
         for bad in (dict(good, started=now + 3600), dict(good, started=-1), dict(good, budget=0),
                     dict(good, budget=7 * 3600), dict(good, budget=float("nan")), dict(good, pid=True),
