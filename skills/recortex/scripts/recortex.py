@@ -1,7 +1,8 @@
 """Shared helpers for the recortex scripts.
 
 Python 3 standard library only. All GitHub access goes through the gh CLI.
-Set GHIM_GH to replace the gh command (the tests point it at a local fake).
+Set RECORTEX_GH to replace the gh command (the tests point it at a local fake).
+The plugin's names, and its environment variables, are read through names.py.
 """
 
 import json
@@ -10,6 +11,8 @@ import re
 import shlex
 import subprocess
 import sys
+
+import names
 
 CONFIG_NAME = ".recortex.json"
 BODY_LIMIT = 65536
@@ -28,7 +31,7 @@ class GhError(RuntimeError):
 
 
 def gh_command():
-    return shlex.split(os.environ.get("GHIM_GH", "gh"))
+    return shlex.split(names.env("GH", "gh"))
 
 
 def gh(args, stdin=None, timeout=60):
@@ -81,10 +84,10 @@ def project_root():
 def find_config():
     """Path of the project's configuration file, or None.
 
-    GHIM_CONFIG, set by the user, names a file explicitly. Otherwise only
+    RECORTEX_CONFIG, set by the user, names a file explicitly. Otherwise only
     <project root>/.recortex.json is considered.
     """
-    env = os.environ.get("GHIM_CONFIG")
+    env = names.env("CONFIG")
     if env:
         return env if os.path.isfile(env) else None
     candidate = os.path.join(project_root(), CONFIG_NAME)
@@ -111,8 +114,8 @@ def config_home():
 
 
 def trusted_file():
-    """GHIM_TRUSTED_FILE when it is an absolute path, else <config home>/recortex/trusted-repos."""
-    env = os.environ.get("GHIM_TRUSTED_FILE")
+    """RECORTEX_TRUSTED_FILE when it is an absolute path, else <config home>/recortex/trusted-repos."""
+    env = names.env("TRUSTED_FILE")
     if env and os.path.isabs(env):
         return env
     return os.path.join(config_home(), "recortex", "trusted-repos")
@@ -122,7 +125,7 @@ def trusted_repos():
     """Repositories the user has trusted, as {"owner/name": {extra allowed logins}}.
 
     Read from the user-level file (one "owner/name [login ...]" per line, # for
-    comments) and from GHIM_TRUSTED_REPOS (comma-separated owner/name). Both
+    comments) and from RECORTEX_TRUSTED_REPOS (comma-separated owner/name). Both
     belong to the user; nothing inside a project can add to this list.
     Keys and logins are lowercase.
     """
@@ -135,7 +138,7 @@ def trusted_repos():
                     trusted.setdefault(parts[0].lower(), set()).update(p.lower() for p in parts[1:])
     except OSError:
         pass
-    for name in os.environ.get("GHIM_TRUSTED_REPOS", "").split(","):
+    for name in names.env("TRUSTED_REPOS", "").split(","):
         name = name.strip()
         if valid_repo(name):  # checked before lowercase, which turns the Kelvin sign into k
             trusted.setdefault(name.lower(), set())

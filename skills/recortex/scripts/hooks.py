@@ -18,7 +18,7 @@ Every event prints nothing and exits 0 when the project has no
 when there is no index yet, or on any error, with two exceptions of fixed
 wording: at session start in the top folder of a git checkout with a GitHub
 remote and no .recortex.json, one line offers to set up the record,
-once per project (off with GHIM_DISCOVERY=0 or "discovery": false in
+once per project (off with RECORTEX_DISCOVERY=0 or "discovery": false in
 ~/.config/recortex/settings.json); and in a project that is set up and
 trusted, one line says why the brief is not shown. Nothing here writes to GitHub.
 
@@ -46,6 +46,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import recortex  # noqa: E402
+import names  # noqa: E402
 import index  # noqa: E402
 import brief  # noqa: E402
 import storage  # noqa: E402
@@ -167,7 +168,7 @@ SIGNAL_WORDS = {"paper": "paper or manuscript files", "thesis": "thesis files", 
 
 
 def discovery_off():
-    if os.environ.get("GHIM_DISCOVERY", "").strip().lower() in ("0", "off", "no", "false"):
+    if names.env("DISCOVERY", "").strip().lower() in ("0", "off", "no", "false"):
         return True
     try:
         with open(os.path.join(recortex.config_home(), "recortex", "settings.json"), encoding="utf-8") as handle:
@@ -484,16 +485,16 @@ def doctor():
         return 1
     trusted = repo.lower() in recortex.trusted_repos()
     allowed = sorted(recortex.allowed_users(repo))
-    print("trusted: %s (trusted list: %s; GHIM_TRUSTED_REPOS %s); allowed authors: %s"
-          % ("yes" if trusted else "no", recortex.trusted_file(), "set" if os.environ.get("GHIM_TRUSTED_REPOS") else "not set",
+    print("trusted: %s (trusted list: %s; RECORTEX_TRUSTED_REPOS %s); allowed authors: %s"
+          % ("yes" if trusted else "no", recortex.trusted_file(), "set" if names.env("TRUSTED_REPOS") else "not set",
              ", ".join(allowed) or "none"))
     if not trusted:
         problems.append("the repository is not trusted, so the hooks stay silent")
-    gh = os.environ.get("GHIM_GH") or shutil.which("gh")
+    gh = names.env("GH") or shutil.which("gh")
     print("gh: %s" % (gh.split()[0] if gh else "not found on PATH"))
     print("storage: index under %s, state and key under %s; hooks and terminal scripts resolve the same folders "
           "(CLAUDE_PLUGIN_DATA is not used)%s" % (storage.cache_top(), storage.state_top(for_key=True),
-                                                 "; GHIM_TESTING and GHIM_DATA_HOME are set (for tests only): index and state under %s"
+                                                 "; RECORTEX_TESTING and RECORTEX_DATA_HOME are set (for tests only): index and state under %s"
                                                  % storage.test_home() if storage.test_home() else ""))
     name = storage.repo_folder(repo)
     rows = [("index top folder", storage.cache_top(), "top"),
@@ -587,7 +588,7 @@ def main(argv=None):
     if not args.event:
         parser.error("name an event or pass --print")
     try:
-        budget = int(os.environ.get("GHIM_HOOK_TIMEOUT", "10"))
+        budget = int(names.env("HOOK_TIMEOUT", "10"))
     except ValueError:
         budget = 10
     try:

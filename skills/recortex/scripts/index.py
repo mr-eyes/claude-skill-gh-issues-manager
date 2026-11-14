@@ -52,6 +52,7 @@ import time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import names  # noqa: E402
 import recortex  # noqa: E402
 import record_format  # noqa: E402
 import storage  # noqa: E402
@@ -301,7 +302,7 @@ def since_query(db, key):
 
 def page_size():
     try:
-        value = int(os.environ.get("GHIM_SYNC_PAGE", "100"))
+        value = int(names.env("SYNC_PAGE", "100"))
     except ValueError:
         value = 100
     return min(100, max(1, value))

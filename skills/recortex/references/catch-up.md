@@ -6,7 +6,7 @@ A project that installs the plugin after months of work can reach the same state
 
 ## 1. Discovery
 
-When the plugin is installed and a session starts in the top folder of a git checkout with a GitHub remote but without `.recortex.json`, the SessionStart hook prints one fixed line, once per project: the plugin is installed, the project has no record yet, and the user can ask to set up the record or to catch up. It reads no project file and makes no network call. Turn it off with `GHIM_DISCOVERY=off` or `{"discovery": false}` in `~/.config/recortex/settings.json`.
+When the plugin is installed and a session starts in the top folder of a git checkout with a GitHub remote but without `.recortex.json`, the SessionStart hook prints one fixed line, once per project: the plugin is installed, the project has no record yet, and the user can ask to set up the record or to catch up. It reads no project file and makes no network call. Turn it off with `RECORTEX_DISCOVERY=off` or `{"discovery": false}` in `~/.config/recortex/settings.json`.
 
 ## 2. Inventory (read-only)
 

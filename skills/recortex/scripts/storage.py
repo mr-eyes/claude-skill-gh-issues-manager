@@ -10,8 +10,8 @@ for hooks but not for the session's Bash tool, so it would split the storage
 between the two. An index left in an older plugin data folder is ignored; the
 first sync builds a new one.
 
-GHIM_DATA_HOME is for tests only, and is read only when GHIM_TESTING=1 is also
-set: the index and the state then go to $GHIM_DATA_HOME/recortex (the
+RECORTEX_DATA_HOME is for tests only, and is read only when RECORTEX_TESTING=1
+is also set: the index and the state then go to $RECORTEX_DATA_HOME/recortex (the
 key stays under XDG_STATE_HOME). Like every top folder, only the folder the
 plugin names, recortex, is created or tightened.
 
@@ -38,6 +38,8 @@ import os
 import stat
 import tempfile
 
+import names
+
 PRIVATE = "private"
 KEY_NAME = "key"
 
@@ -61,10 +63,11 @@ def _env_dir(name, default):
 
 
 def test_home():
-    """$GHIM_DATA_HOME/recortex, for tests only: one top folder for the index and the state. Read only when
-    GHIM_TESTING=1 is also set and the value is an absolute path; None otherwise."""
-    value = os.environ.get("GHIM_DATA_HOME")
-    if os.environ.get("GHIM_TESTING") != "1" or not value or not os.path.isabs(value):
+    """$RECORTEX_DATA_HOME/recortex, for tests only: one top folder for the index and the state. Read only when
+    RECORTEX_TESTING=1 is also set and the value is an absolute path; None otherwise. Either variable may have its
+    name from before the rename (names.env)."""
+    value = names.env("DATA_HOME")
+    if names.env("TESTING") != "1" or not value or not os.path.isabs(value):
         return None
     return os.path.join(value, "recortex")
 
