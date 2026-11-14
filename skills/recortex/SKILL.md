@@ -1,6 +1,6 @@
 ---
 name: recortex
-description: Keeps a project's record in GitHub issues - one pinned hub issue, one topic issue per part of the deliverable whose body is the deliverable's current text for that part, and dated comments for results, decisions and failures. Use in a project that has a .recortex.json file or a pinned hub issue, when recording a result, decision, failure or merged change, when resuming a session or recovering after context compaction, when triaging an issue someone opened by hand, when posting a resume block, and when compiling a paper, release or report from the record. Also use when the user asks to set up such a record (a short wizard of questions), to catch up a project that already has months of work, or to migrate an older issue tracker.
+description: Keeps a project's record in GitHub issues (formerly gh-issues-manager) - one pinned hub issue, one topic issue per part of the deliverable whose body is the deliverable's current text for that part, and dated comments for results, decisions and failures. Use in a project that has a .recortex.json file (or .gh-issues-manager.json, the name before the rename) or a pinned hub issue, when recording a result, decision, failure or merged change, when resuming a session or recovering after context compaction, when triaging an issue someone opened by hand, when posting a resume block, and when compiling a paper, release or report from the record. Also use when the user asks to set up such a record (a short wizard of questions), to catch up a project that already has months of work, or to migrate an older issue tracker.
 ---
 
 # GitHub issues as the project record
@@ -11,7 +11,7 @@ Scripts live in `${CLAUDE_SKILL_DIR}/scripts`, templates in `${CLAUDE_SKILL_DIR}
 
 ## Configuration
 
-A project opts in with a `.recortex.json` file at its root (example: [templates/recortex.example.json](templates/recortex.example.json)):
+A project opts in with a `.recortex.json` file at its root (example: [templates/recortex.example.json](templates/recortex.example.json)). A project or machine set up under the plugin's earlier name keeps working as it is: [references/upgrading.md](references/upgrading.md).
 
 | Key | Meaning |
 |---|---|

@@ -4,7 +4,7 @@ The usual way to set up a record is the wizard in [setup.md](setup.md), which as
 
 > Commands on this page write `scripts/<name>` for short. That is the `scripts` folder of this skill, next to `SKILL.md`; call it by its full path.
 
-The scripts read `.recortex.json` from one place: the top of the git checkout that contains the current folder, or the current folder outside a checkout. Run them from inside the project and check the `config: ... repo: ...` line each prints first.
+The scripts read `.recortex.json` (or the configuration file under the plugin's earlier name, [upgrading.md](upgrading.md)) from one place: the top of the git checkout that contains the current folder, or the current folder outside a checkout. Run them from inside the project and check the `config: ... repo: ...` line each prints first.
 
 ## 1. Agree on the frame with the owner
 

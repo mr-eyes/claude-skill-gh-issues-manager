@@ -24,7 +24,7 @@ All templates are in `templates/`. Fields to fill are written `{{like this}}`; t
 
 ## Field notes
 
-**Event marker.** The first line of every event comment: `<!-- ghim:event type=<type> at=<YYYY-MM-DDTHH:MM+HH:MM> -->`, with the type in lower case (`result`, `decision`, `failure`, `checkpoint`, `correction`) and the same local date and time as the heading, followed by its UTC offset (`date '+%Y-%m-%dT%H:%M%:z'`). The linter rejects a comment whose marker is missing or disagrees with its heading.
+**Event marker.** The first line of every event comment: `<!-- ghim:event type=<type> at=<YYYY-MM-DDTHH:MM+HH:MM> -->`, with the type in lower case (`result`, `decision`, `failure`, `checkpoint`, `correction`) and the same local date and time as the heading, followed by its UTC offset (`date '+%Y-%m-%dT%H:%M%:z'`). The linter rejects a comment whose marker is missing or disagrees with its heading. The marker prefix `ghim:` predates the plugin's name and is kept, so that comments posted before and after the rename are one format.
 
 **Figures and tables.** In a body, a figure is a `### Figure: <id> - <title>` block inside its section: a caption with every number's denominator, then the image embedded from the commit or tag it was committed in. Its row under "Sources" starts with `Figure <id>` and gives `data` and `command` in backticks: ``| Figure read-time | data `bench/out/summary.tsv`; command `python bench/plot.py bench/out/summary.tsv`; commit 4f2a9c1 |``. A table block is the same with `### Table:` and a Markdown table or a link to a committed file. `compile.py` lists both, with their sources.
 
