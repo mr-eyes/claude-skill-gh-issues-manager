@@ -165,6 +165,16 @@ class LintTests(unittest.TestCase):
             findings = self.lint(text, kind=kind, template=True, allow_placeholders=True)
             self.assertEqual([], [str(f) for f in findings], name)
 
+    def test_a_marker_with_the_new_name_is_not_an_event_marker(self):
+        """The markers are the record format and keep the ghim: prefix (D3): one format before and after the rename."""
+        draft = recortex.read_text(os.path.join(EXAMPLE, "result-speed-1.md"))
+        renamed = draft.replace("<!-- ghim:event ", "<!-- recortex:event ", 1)
+        self.assertTrue(renamed.startswith("<!-- recortex:event type=result at="))
+        self.assertEqual([], codes(self.lint(draft, kind="result")))
+        findings = [f for f in self.lint(renamed, kind="result") if f.code == "event-marker"]
+        self.assertEqual(1, len(findings))
+        self.assertIn("'<!-- ghim:event type=result at=<YYYY-MM-DDTHH:MM+HH:MM> -->'", findings[0].message)
+
     def test_unfilled_template_fails_outside_template_mode(self):
         text = recortex.read_text(os.path.join(TEMPLATES, "comment-result.md"))
         self.assertIn("template-field", codes(self.lint(text, kind="result")))
@@ -4525,19 +4535,21 @@ class EarlierNameTests(RecordSandbox):
     def test_a_symlink_at_the_current_name_is_refused_and_the_earlier_folder_not_read(self):
         self.xdg_storage(cache=[(names.OLD_NAME, 0o700)], state=[(names.OLD_NAME, 0o700)])
         self.ready()
-        elsewhere = os.path.join(self.dir, "elsewhere")
+        elsewhere, missing = os.path.join(self.dir, "elsewhere"), os.path.join(self.dir, "missing")
         os.makedirs(elsewhere, mode=0o700)
         refused = ["recortex: record brief not shown: the local storage was refused (a storage folder or file is a "
                    "symlink). Run hooks.py --doctor."]
-        for base in ("xdg-cache", "xdg-state"):
+        for base, target in (("xdg-cache", elsewhere), ("xdg-state", elsewhere), ("xdg-cache", missing),
+                             ("xdg-state", missing)):  # a link to a folder, and one that leads nowhere
             link = os.path.join(self.dir, base, names.NAME)
-            os.symlink(elsewhere, link)
+            os.symlink(target, link)
             earlier = os.path.join(self.dir, base, names.OLD_NAME)
             before = sorted(os.walk(earlier))
             self.assertEqual(refused, self.hook("session-start").stdout.strip().split("\n"), base)
             self.assertEqual("", self.hook("pre-compact").stdout, base)
             self.assertEqual(before, sorted(os.walk(earlier)), base)
             self.assertEqual([], os.listdir(elsewhere), base)
+            self.assertFalse(os.path.lexists(missing), base)
             os.unlink(link)
         self.assertIn("(read from GitHub just now)", self.hook("session-start").stdout)
 
@@ -4785,6 +4797,74 @@ class PackagingTests(unittest.TestCase):
         entry = market["plugins"][0]
         self.assertEqual(plugin["name"], entry["name"])
         self.assertEqual("./", entry["source"])
+
+    def test_the_packaging_carries_the_new_name(self):
+        plugin = self.read_json(".claude-plugin", "plugin.json")
+        market = self.read_json(".claude-plugin", "marketplace.json")
+        self.assertEqual(("recortex", "https://github.com/mr-eyes/recortex"), (plugin["name"], plugin["repository"]))
+        self.assertEqual("mr-eyes-skills", market["name"])  # a changed marketplace name has no migration
+        self.assertEqual(["recortex"], [entry["name"] for entry in market["plugins"]])
+        self.assertEqual({names.OLD_NAME: names.NAME}, market["renames"])
+        self.assertNotIn("forceRemoveDeletedPlugins", market)
+        hooks = self.read_json("hooks", "hooks.json")["hooks"]
+        commands = [h["command"] for entries in hooks.values() for entry in entries for h in entry["hooks"]]
+        self.assertEqual(4, len(commands))
+        for command in commands:
+            relative = re.search(r"^\"\$\{CLAUDE_PLUGIN_ROOT\}\"/(skills/recortex/scripts/[a-z_]+\.sh)( [a-z-]+)?$",
+                                 command).group(1)
+            self.assertTrue(os.access(os.path.join(ROOT, relative), os.X_OK), relative)
+        snippet = json.loads(recortex.read_text(os.path.join(TEMPLATES, "settings-hook-snippet.json")))["hooks"]
+        for entries in snippet.values():
+            command = entries[0]["hooks"][0]["command"]
+            script = re.search(r"^\"\$HOME/\.claude/skills/recortex/scripts/([a-z_]+\.sh)\"", command).group(1)
+            self.assertTrue(os.path.isfile(os.path.join(SCRIPTS, script)), command)
+        for name in ("record-drafter", "record-reviewer", "record-auditor"):
+            self.assertIn("\nskills: recortex\n", recortex.read_text(os.path.join(ROOT, "agents", name + ".md")))
+        self.assertIn("\nname: recortex\n", recortex.read_text(os.path.join(SKILL, "SKILL.md")))
+        self.assertEqual("skills/recortex", os.path.relpath(SKILL, ROOT))
+
+    def test_no_file_holds_an_earlier_name_outside_the_places_that_keep_it(self):
+        """Like the digit scan: the names from before the rename appear only where they are kept on purpose."""
+        earlier = re.compile(r"gh-issues-manager|ghim|GHIM_", re.I)
+        markers = re.compile(r"ghim:(?:event|resume:start|resume:end)?")  # the record format, kept (D3)
+
+        def upgrade_section(lines):
+            inside, keep = False, set()
+            for number, line in enumerate(lines):
+                if line.startswith("## "):
+                    inside = line.startswith("## Upgrading from ")
+                if inside:
+                    keep.add(number)
+            return keep
+
+        everywhere = lambda lines: set(range(len(lines)))
+        where = lambda test: (lambda lines: {n for n, line in enumerate(lines) if test(line)})
+        allowed = {  # path: the lines that may name an earlier name
+            "skills/recortex/scripts/names.py": everywhere,
+            "skills/recortex/references/upgrading.md": everywhere,
+            "tests/test_scripts.py": everywhere,  # the tests of the earlier names
+            "skills/recortex/scripts/run_hook.sh": where(lambda line: "GHIM_HOOK_TIMEOUT" in line),
+            ".claude-plugin/marketplace.json": where(lambda line: line.strip() == '"gh-issues-manager": "recortex"'),
+            "skills/recortex/SKILL.md": where(lambda line: line.startswith("description: ")),
+            "README.md": upgrade_section,
+            "CONTRIBUTING.md": where(lambda line: "names.py" in line),
+        }
+        found, used = [], set()
+        for folder, dirs, files in os.walk(ROOT):
+            dirs[:] = [d for d in dirs if d not in (".git", ".tmp", "__pycache__")]
+            for name in files:
+                path = os.path.relpath(os.path.join(folder, name), ROOT).replace(os.sep, "/")
+                self.assertIsNone(earlier.search(path), path)  # no path keeps an earlier name
+                lines = recortex.read_text(os.path.join(ROOT, path)).split("\n")
+                keep = allowed[path](lines) if path in allowed else set()
+                for number, line in enumerate(lines):
+                    if earlier.search(markers.sub("", line)):
+                        if number in keep:
+                            used.add(path)
+                        else:
+                            found.append("%s:%d: %s" % (path, number + 1, line.strip()[:80]))
+        self.assertEqual([], found)
+        self.assertEqual(sorted(allowed), sorted(used))  # every entry of the allowlist is still needed
 
     def test_each_hook_is_stopped_before_its_timeout(self):
         hooks = self.read_json("hooks", "hooks.json")["hooks"]
