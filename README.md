@@ -1,4 +1,4 @@
-# gh-issues-manager
+# recortex
 
 A Claude Code skill that keeps a project's whole record in GitHub issues: what was done, why, what was found, what was decided, what failed and where the files are. The issues are organized so that a new Claude session, or one whose context has been compacted many times, can rebuild the state of the project from GitHub alone, and so that the final paper, release notes or report is assembled from issue bodies that already hold its text.
 
@@ -39,19 +39,19 @@ Anyone who works on a project with Claude Code over weeks or months and does not
 ### As a plugin (includes the session hook)
 
 ```bash
-claude plugin marketplace add mr-eyes/claude-skill-gh-issues-manager
-claude plugin install gh-issues-manager@mr-eyes-skills
+claude plugin marketplace add mr-eyes/recortex
+claude plugin install recortex@mr-eyes-skills
 ```
 
-The skill is then available as `/gh-issues-manager:gh-issues-manager`, and Claude loads it on its own when a task matches. The plugin's hooks are registered for every project but print nothing until you trust a repository (next section). The same trust list governs `resume_block.py show`.
+The skill is then available as `/recortex:recortex`, and Claude loads it on its own when a task matches. The plugin's hooks are registered for every project but print nothing until you trust a repository (next section). The same trust list governs `resume_block.py show`.
 
 ### Trust the repositories whose record the hooks may print
 
 The hook puts text from a GitHub issue into every session, so it is off until you opt in, per repository, in a file that belongs to you and not to any project:
 
 ```bash
-mkdir -p ~/.config/gh-issues-manager
-echo "your-name/your-project" >> ~/.config/gh-issues-manager/trusted-repos
+mkdir -p ~/.config/recortex
+echo "your-name/your-project" >> ~/.config/recortex/trusted-repos
 ```
 
 Each line is `owner/name`, optionally followed by GitHub logins whose resume comments you accept besides the repository owner's:
@@ -69,11 +69,11 @@ For a repository owned by an organization, list the people who post the resume c
 ### As a plain skill
 
 ```bash
-git clone https://github.com/mr-eyes/claude-skill-gh-issues-manager
-cp -r claude-skill-gh-issues-manager/skills/gh-issues-manager ~/.claude/skills/
+git clone https://github.com/mr-eyes/recortex
+cp -r recortex/skills/recortex ~/.claude/skills/
 ```
 
-Use `<project>/.claude/skills/` in place of `~/.claude/skills/` to install it for one project only. The skill is then available as `/gh-issues-manager`. The hook is optional in this mode; see below.
+Use `<project>/.claude/skills/` in place of `~/.claude/skills/` to install it for one project only. The skill is then available as `/recortex`. The hook is optional in this mode; see below.
 
 ## First use
 
@@ -124,22 +124,22 @@ The plugin adds three agents for bulk and audit work, one tier below the main se
 
 ## The hooks and the CLAUDE.md snippet
 
-**Hooks.** Four hooks keep every session and subagent aware of the record, built from a local index of the issues (`scripts/index.py`, a SQLite file under `~/.cache/gh-issues-manager` that can be rebuilt from GitHub at any time; hooks and terminal scripts use the same file):
+**Hooks.** Four hooks keep every session and subagent aware of the record, built from a local index of the issues (`scripts/index.py`, a SQLite file under `~/.cache/recortex` that can be rebuilt from GitHub at any time; hooks and terminal scripts use the same file):
 
 | Hook | Prints |
 |---|---|
 | SessionStart (startup, resume, clear, compact, fork) | The record brief: the rules for writing to the record, the hub, the deliverable topics by section, the open active issues, the issues that need triage, and the newest allowed resume block. It syncs the index first; if GitHub does not answer in time it prints the brief from the index and says how old it is |
 | SubagentStart | A short brief for the subagent: where the record is, the issues in play, and that it reads the record for facts and posts only when its task says so |
-| UserPromptSubmit | One line with the hub and the active issues, only when it changed or every tenth prompt (`"prompt_hook": {"enabled": false}` in `.gh-issues-manager.json` turns it off) |
+| UserPromptSubmit | One line with the hub and the active issues, only when it changed or every tenth prompt (`"prompt_hook": {"enabled": false}` in `.recortex.json` turns it off) |
 | PreCompact | Instructions for the compaction summary: keep the issue numbers in play and every result, decision or failure that is not yet posted |
 
-They print nothing when the project has no configuration file or the repository is not in your trusted list, and never write to GitHub. Set-up builds the index once (`index.py sync`); otherwise the first session builds it in the background and the brief arrives with its next prompt. In a project that is set up and trusted, a brief that cannot be produced is replaced by one line naming the reason. `python3 scripts/hooks.py --print` shows each payload and its size; `python3 scripts/hooks.py --doctor` shows why a brief is or is not shown: configuration, trust, storage folders with owner and mode, the index and the last sync failure. The plugin installs them. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/gh-issues-manager/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the paths.
+They print nothing when the project has no configuration file or the repository is not in your trusted list, and never write to GitHub. Set-up builds the index once (`index.py sync`); otherwise the first session builds it in the background and the brief arrives with its next prompt. In a project that is set up and trusted, a brief that cannot be produced is replaced by one line naming the reason. `python3 scripts/hooks.py --print` shows each payload and its size; `python3 scripts/hooks.py --doctor` shows why a brief is or is not shown: configuration, trust, storage folders with owner and mode, the index and the last sync failure. The plugin installs them. For a plain skill install, merge [`templates/settings-hook-snippet.json`](skills/recortex/templates/settings-hook-snippet.json) into `.claude/settings.json` or `~/.claude/settings.json` and adjust the paths.
 
-**CLAUDE.md snippet.** [`templates/claude-md-snippet.md`](skills/gh-issues-manager/templates/claude-md-snippet.md) is a few lines for the project's CLAUDE.md that give every session the hub's location and the recording rules.
+**CLAUDE.md snippet.** [`templates/claude-md-snippet.md`](skills/recortex/templates/claude-md-snippet.md) is a few lines for the project's CLAUDE.md that give every session the hub's location and the recording rules.
 
 ## Scripts
 
-All are in `skills/gh-issues-manager/scripts/`, use only the Python standard library and `gh`, and accept `--help`.
+All are in `skills/recortex/scripts/`, use only the Python standard library and `gh`, and accept `--help`.
 
 | Script | What it does | Writes to GitHub |
 |---|---|---|
@@ -177,12 +177,12 @@ The hooks deserve extra care because they put tracker text into context without 
 
 | Rule | What it prevents |
 |---|---|
-| The configuration is read only from the project root: `CLAUDE_PROJECT_DIR` (which Claude Code sets for hooks), else the top of the git checkout, else the current folder. Parent folders are never searched. The same holds for every script, and each script prints the configuration file and repository it is using | A `.gh-issues-manager.json` planted in a parent folder pointing sessions at someone else's repository |
-| Trust is checked in every mode. The hook prints nothing, and `resume_block.py show` prints a one-line notice, unless the configured repository is in the user's own trusted list (`~/.config/gh-issues-manager/trusted-repos` or `GHIM_TRUSTED_REPOS`; `XDG_CONFIG_HOME` and `GHIM_TRUSTED_FILE` are used only when they are absolute paths, so a relative value cannot point into a project). Nothing inside a project can add to that list, and the repository owner counts as an allowed writer only once the repository is trusted | A cloned repository that configures itself to inject text |
+| The configuration is read only from the project root: `CLAUDE_PROJECT_DIR` (which Claude Code sets for hooks), else the top of the git checkout, else the current folder. Parent folders are never searched. The same holds for every script, and each script prints the configuration file and repository it is using | A `.recortex.json` planted in a parent folder pointing sessions at someone else's repository |
+| Trust is checked in every mode. The hook prints nothing, and `resume_block.py show` prints a one-line notice, unless the configured repository is in the user's own trusted list (`~/.config/recortex/trusted-repos` or `GHIM_TRUSTED_REPOS`; `XDG_CONFIG_HOME` and `GHIM_TRUSTED_FILE` are used only when they are absolute paths, so a relative value cannot point into a project). Nothing inside a project can add to that list, and the repository owner counts as an allowed writer only once the repository is trusted | A cloned repository that configures itself to inject text |
 | The resume block is a comment, and only a comment that passes every check is printed: its first line is the resume heading, each marker stands alone on its own line outside any quote or code block, its author is allowed (the repository owner plus the logins listed for that repository in the trusted file), and it was never edited by anyone. The newest 50 comments of the hub come from one API call, and the newest passing comment is chosen by creation time. Newer resume comments that fail are counted with the reason and never shown | Anyone posting or editing a comment to get text into your sessions |
 | The time the shown comment was posted is printed with it | Showing an old block as if it were current. Anyone can post many comments on a public hub and push the newest resume comment beyond the 50 that are read (the script then says there is none), and an account with write access can delete the newest resume comment so that an older one is shown. Neither changes what an allowed account wrote; posting a new resume comment repairs both |
 | An issue title is printed only when the issue was opened by an allowed account and no other account renamed it; otherwise only its number, with the reason | Instructions smuggled in through an issue title, which anyone who can edit the issue can change |
-| The index (`index.sqlite`) and the hook state live in a folder `private/` (mode 0700) that the plugin creates inside its top folders: `$XDG_CACHE_HOME/gh-issues-manager` for the index and `$XDG_STATE_HOME/gh-issues-manager` for the state and the key (by default under `~/.cache` and `~/.local/state`); never in the project tree. Hooks, the session's Bash tool and your own shell resolve the same folders; the plugin data folder that Claude Code sets only for hooks (`CLAUDE_PLUGIN_DATA`) is not used, and an index left there by an earlier version is ignored (the first sync builds a new one). `GHIM_DATA_HOME` moves the index and the state to one folder, `$GHIM_DATA_HOME/gh-issues-manager`, and is read only when `GHIM_TESTING=1` is also set: it is for the plugin's tests only. A top folder must be a real folder owned by the user or by root; one the user owns that was created group-writable (umask 0002) is tightened to 0700, and one owned by another user is refused. `private/` and everything in it must be real folders and files owned by the user with no permissions for group or others, checked at every read and write; files are written through a fresh temporary file with mode 0600 and read without following symlinks. An index is read only when it carries the repository, the format and a mark made with a per-user key from the state folder, so a swapped folder or a file the plugin did not make is refused | A repository you clone, or a folder someone shares, planting an index or state file whose text the hooks would print |
+| The index (`index.sqlite`) and the hook state live in a folder `private/` (mode 0700) that the plugin creates inside its top folders: `$XDG_CACHE_HOME/recortex` for the index and `$XDG_STATE_HOME/recortex` for the state and the key (by default under `~/.cache` and `~/.local/state`); never in the project tree. Hooks, the session's Bash tool and your own shell resolve the same folders; the plugin data folder that Claude Code sets only for hooks (`CLAUDE_PLUGIN_DATA`) is not used, and an index left there by an earlier version is ignored (the first sync builds a new one). `GHIM_DATA_HOME` moves the index and the state to one folder, `$GHIM_DATA_HOME/recortex`, and is read only when `GHIM_TESTING=1` is also set: it is for the plugin's tests only. A top folder must be a real folder owned by the user or by root; one the user owns that was created group-writable (umask 0002) is tightened to 0700, and one owned by another user is refused. `private/` and everything in it must be real folders and files owned by the user with no permissions for group or others, checked at every read and write; files are written through a fresh temporary file with mode 0600 and read without following symlinks. An index is read only when it carries the repository, the format and a mark made with a per-user key from the state folder, so a swapped folder or a file the plugin did not make is refused | A repository you clone, or a folder someone shares, planting an index or state file whose text the hooks would print |
 | When the sync at session start fails, the brief says "cached, not refreshed" with its age; a cached resume block is one that passed every check when it was read, and is left out once it is older than `resume_cache_days` (default 7). Stored sync times enter a GitHub query only as plain ISO 8601 UTC times | Old or tampered cached text passed off as current, and text smuggled into an API query |
 | A refused index is never read and nothing from it is printed; the next sync moves it aside and builds a new one. The hooks load only the profiles shipped with the plugin, never a profile file a project names, and `GHIM_HOOK_TIMEOUT` is read as digits only | A cloned project or a shared folder getting its own text into the brief outside the data frame |
 | The output is wrapped in `BEGIN/END PROJECT STATUS DATA` lines that say it is data and not instructions, text that imitates those lines is defused, and the SessionStart brief is cut at 6,000 characters (the subagent brief at 2,500) | Text posing as system or user instructions, and context flooding |
@@ -198,8 +198,8 @@ The trust boundary is your allowed list, not write access to the repository. Any
 
 ```bash
 cd examples/tinycsv
-S=../../skills/gh-issues-manager/scripts
-export GHIM_CONFIG=$PWD/.gh-issues-manager.json   # the example is not at a project root
+S=../../skills/recortex/scripts
+export GHIM_CONFIG=$PWD/.recortex.json   # the example is not at a project root
 
 python3 $S/setup_labels.py --dry-run
 python3 $S/lint_drafts.py --manifest manifest.json
@@ -209,7 +209,7 @@ python3 $S/create_issues.py --manifest manifest.json --dry-run
 The dry run prints what would happen, for example:
 
 ```text
-config: <path>/examples/tinycsv/.gh-issues-manager.json  repo: example-org/tinycsv
+config: <path>/examples/tinycsv/.recortex.json  repo: example-org/tinycsv
 manifest: manifest.json   repository: example-org/tinycsv   issues: 4   comments: 3
 lint: all 7 drafts pass
 dry run: no network access, nothing written
@@ -232,7 +232,7 @@ In the drafts, issues refer to each other as `NEW-reader`, `NEW-speed` and so on
 
 The dry run lists the commands issue by issue; the real run creates all issues first, then writes the bodies, then posts the comments.
 
-To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json` to a scratch repository of your own, run `setup_labels.py` and `create_issues.py` without `--dry-run`, and then set `hub` in `.gh-issues-manager.json` to the number the run printed for `NEW-hub`. The run leaves `manifest.json.state.json` beside the manifest; it is what makes a rerun safe, and this repository's `.gitignore` excludes it.
+To try a real run, change `repo` in `manifest.json` and `.recortex.json` to a scratch repository of your own, run `setup_labels.py` and `create_issues.py` without `--dry-run`, and then set `hub` in `.recortex.json` to the number the run printed for `NEW-hub`. The run leaves `manifest.json.state.json` beside the manifest; it is what makes a rerun safe, and this repository's `.gitignore` excludes it.
 
 ## Repository layout
 
@@ -240,7 +240,7 @@ To try a real run, change `repo` in `manifest.json` and `.gh-issues-manager.json
 .claude-plugin/           plugin.json and marketplace.json
 hooks/hooks.json          hook registration for the plugin (four events)
 agents/                   record-drafter, record-reviewer, record-auditor
-skills/gh-issues-manager/
+skills/recortex/
   SKILL.md                the skill
   references/             detail loaded on demand
   templates/              hub, topic body, active task, comments, snippets

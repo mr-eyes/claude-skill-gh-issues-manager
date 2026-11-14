@@ -1,5 +1,5 @@
 {
-  "name": "gh-issues-manager",
+  "name": "recortex",
   "version": "0.4.1",
   "description": "Keep a project's full record in GitHub issues: a pinned hub, one issue per topic whose body is the deliverable's current text, dated comments for results, decisions and failures, and a resume block that survives context compaction.",
   "author": {
@@ -7,6 +7,6 @@
     "url": "https://github.com/mr-eyes"
   },
   "license": "MIT",
-  "repository": "https://github.com/mr-eyes/claude-skill-gh-issues-manager",
+  "repository": "https://github.com/mr-eyes/recortex",
   "keywords": ["github", "issues", "project-management", "research", "manuscript"]
 }

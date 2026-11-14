@@ -1,5 +1,5 @@
 {
-  "description": "Inject the project's record brief from GitHub issues: at session start, resume, clear, compaction and fork; into every subagent; as one line on user prompts when it changed; and as instructions for the compaction summary. Silent unless the project has a .gh-issues-manager.json file and the user has trusted its repository, except for one fixed line at session start, once per project, in the top folder of a git checkout with a GitHub remote and no setup, offering to set up the record.",
+  "description": "Inject the project's record brief from GitHub issues: at session start, resume, clear, compaction and fork; into every subagent; as one line on user prompts when it changed; and as instructions for the compaction summary. Silent unless the project has a .recortex.json file and the user has trusted its repository, except for one fixed line at session start, once per project, in the top folder of a git checkout with a GitHub remote and no setup, offering to set up the record.",
   "hooks": {
     "SessionStart": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/session_start_hook.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/recortex/scripts/session_start_hook.sh",
             "timeout": 20
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh subagent-start",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/recortex/scripts/run_hook.sh subagent-start",
             "timeout": 10
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh prompt-submit",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/recortex/scripts/run_hook.sh prompt-submit",
             "timeout": 5
           }
         ]
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/gh-issues-manager/scripts/run_hook.sh pre-compact",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/recortex/scripts/run_hook.sh pre-compact",
             "timeout": 10
           }
         ]

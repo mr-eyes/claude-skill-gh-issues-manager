@@ -1,15 +1,18 @@
 {
   "name": "mr-eyes-skills",
-  "description": "Skills by mr-eyes. Currently one plugin: gh-issues-manager.",
+  "description": "Skills by mr-eyes. Currently one plugin: recortex.",
   "owner": {
     "name": "mr-eyes",
     "url": "https://github.com/mr-eyes"
   },
   "plugins": [
     {
-      "name": "gh-issues-manager",
+      "name": "recortex",
       "source": "./",
       "description": "Keep a project's full record in GitHub issues, organized so a new or compacted session can resume from GitHub alone."
     }
-  ]
+  ],
+  "renames": {
+    "gh-issues-manager": "recortex"
+  }
 }

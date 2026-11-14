@@ -1,0 +1,30 @@
+# recortex triage labeler, optional; setup.py writes it when the user asks for it.
+# It adds the label "triage" to an issue opened or reopened without a role label, so the issue is flagged for
+# triage even when no Claude session runs. It uses only the default GITHUB_TOKEN with permission to write issues,
+# reads no title or body, and never edits one.
+name: recortex-triage
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    if: >-
+      !contains(github.event.issue.labels.*.name, 'hub') &&
+      !contains(github.event.issue.labels.*.name, 'final-record') &&
+      !contains(github.event.issue.labels.*.name, 'active') &&
+      !contains(github.event.issue.labels.*.name, 'triage') &&
+      !contains(github.event.issue.labels.*.name, 'type:duplicate') &&
+      !contains(github.event.issue.labels.*.name, 'type:out-of-scope')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add the triage label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: gh issue edit "$NUMBER" --repo "$REPO" --add-label triage
