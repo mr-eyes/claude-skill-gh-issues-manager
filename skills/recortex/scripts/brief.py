@@ -15,6 +15,7 @@ import re
 
 import recortex
 import index
+import names
 
 BEGIN = "===== BEGIN PROJECT STATUS DATA (recortex) ====="
 END = "===== END PROJECT STATUS DATA ====="
@@ -25,6 +26,10 @@ TITLE_CAP = 80
 URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull)/[0-9]+", re.ASCII)
 PROTOCOL = ("recortex: follow the session protocol of the recortex skill before acting: this brief, "
             "the open active issues, then the newest comments of the topics in play.")
+# For projects whose CLAUDE.md still names the skill by the plugin's name before 0.5.0. Fixed wording, outside the
+# data frame, in the session-start and subagent payloads only; it says nothing about what this machine has.
+ALIAS = ("%s was named %s before version 0.5.0; where a project file names the %s skill, use the %s skill."
+         % (names.NAME, names.OLD_NAME, names.OLD_NAME, names.NAME))
 
 
 def defuse(text):
@@ -167,14 +172,14 @@ def session_payload(record, fresh):
     """The SessionStart brief. Lists are shortened to fit the cap; the END and protocol lines are always there."""
     limit = CAPS["session-start"]
     head = ["recortex record brief for %s (%s)." % (record.repo, record.freshness(fresh)),
-            "Rules: " + RULES % record.repo, "", BEGIN, DATA_NOTE, ""]
+            "Rules: " + RULES % record.repo, ALIAS, "", BEGIN, DATA_NOTE, ""]
     resume = index.get_meta(record.db, "resume") or ""
     note = index.get_meta(record.db, "resume_note") or "not read"
     days = resume_days(record.config)
     read_at = index.get_meta(record.db, "resume_read_at")
     if resume and fresh in (False, "partial") and days_old(read_at) > days:
         note = ("left out: the cached copy was read %s, longer ago than the limit of %s day%s (resume_cache_days in "
-                ".recortex.json); read the hub's newest resume comment"
+                "the project's configuration file); read the hub's newest resume comment"
                 % (index.age_text(read_at), days, "" if days == 1 else "s"))
         resume = ""
     tail_lines = ["", "Resume block: %s." % defuse(note)]
@@ -223,7 +228,7 @@ def subagent_payload(record, fresh=None):
         "guessing. Do not post to GitHub unless your task says so. Return results as facts with file paths, "
         "numbers with their denominators, and what is not established, so the main session can record them. "
         "If your task tells you to post, invoke the recortex skill and use its scripts.",
-        BEGIN, DATA_NOTE,
+        ALIAS, BEGIN, DATA_NOTE,
     ]
     shown = play[:12]
     while True:
