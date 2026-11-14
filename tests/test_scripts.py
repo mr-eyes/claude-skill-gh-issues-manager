@@ -4029,6 +4029,25 @@ class SetupTests(Sandbox):
         config = json.loads(recortex.read_text(os.path.join(root, names.OLD_CONFIG_NAME)))
         self.assertEqual((["software", "manuscript"], hub), (recortex.profile_names(config["profiles"]), config["hub"]))
 
+    def test_apply_writes_the_current_file_when_both_are_there(self):
+        """Fails when config_target prefers the earlier file whenever it exists: find_config reads the current file,
+        so apply must write that one."""
+        root = self.project()
+        env = {"XDG_STATE_HOME": os.path.join(self.dir, "xdg-state"), "CLAUDE_PROJECT_DIR": root}
+        first = self.setup_script("apply", "--answers", self.answers("single", triage_workflow=False, claude_md=False),
+                                  "--root", root, "--yes", gh=FAKE, env=env)
+        self.assertEqual(0, first.returncode, first.stdout + first.stderr)
+        earlier = os.path.join(root, names.OLD_CONFIG_NAME)
+        with open(earlier, "w") as handle:
+            handle.write('{"repo": "example-org/left-behind", "hub": 99}\n')
+        again = self.setup_script("apply", "--answers", self.answers("custom", deliverables=[{"kind": "paper"}]),
+                                  "--root", root, "--yes", gh=FAKE, env=env)
+        self.assertEqual(0, again.returncode, again.stdout + again.stderr)
+        self.assertIn("config (%s):" % names.CONFIG_NAME, again.stdout)
+        self.assertEqual('{"repo": "example-org/left-behind", "hub": 99}\n', recortex.read_text(earlier))  # not touched
+        config = json.loads(recortex.read_text(os.path.join(root, names.CONFIG_NAME)))
+        self.assertEqual(["software", "manuscript"], recortex.profile_names(config["profiles"]))
+
     def test_an_installed_labeler_of_the_earlier_name_is_kept(self):
         root = self.project([".github/workflows/" + names.OLD_WORKFLOW])
         installed = os.path.join(root, ".github", "workflows", names.OLD_WORKFLOW)
@@ -4775,6 +4794,32 @@ class EarlierNameTests(RecordSandbox):
         self.assertNotIn("note: ", doctor)
         self.assertNotIn("environment: ", doctor)
         self.assertNotIn("before the rename", doctor)
+
+    def test_the_clamped_budget_reaches_the_python_side_under_either_name(self):
+        """Fails without `export RECORTEX_HOOK_TIMEOUT="$limit"` in run_hook.sh, and when the earlier name is exported
+        in its place: Python then plans for 99 s and is stopped by the safety net with nothing printed."""
+        self.ready()
+        for variable in ("GHIM_HOOK_TIMEOUT", "RECORTEX_HOOK_TIMEOUT"):
+            env = {"FAKE_GH_SLEEP": "20", "RECORTEX_HOOK_TIMEOUT": None, "GHIM_HOOK_TIMEOUT": None}
+            env[variable] = "99"  # above the most run_hook.sh allows, 15
+            start = time.time()
+            slow = self.hook("session-start", env=env)
+            self.assertLess(time.time() - start, 17, variable)
+            self.assertIn("cached, not refreshed", slow.stdout, variable)
+            self.stop_background()  # the sync that continues in the background would take minutes at this speed
+            self.wait_background()
+
+    def test_the_budget_is_never_evaluated_under_either_name(self):
+        """Fails without the digit check in run_hook.sh ('1+x' is short enough for the length check, and x is then
+        evaluated), and without both checks ('1+a[...]')."""
+        self.ready()
+        planted = os.path.join(self.dir, "evaluated")
+        for variable in ("GHIM_HOOK_TIMEOUT", "RECORTEX_HOOK_TIMEOUT"):
+            for value in ("1+x", "1+a[$(touch %s)]" % planted, "x"):
+                env = {"RECORTEX_HOOK_TIMEOUT": None, "GHIM_HOOK_TIMEOUT": None, "x": "a[$(touch %s)]" % planted}
+                env[variable] = value
+                self.assertIn("(read from GitHub just now)", self.hook("session-start", env=env).stdout, (variable, value))
+                self.assertFalse(os.path.exists(planted), (variable, value))
 
     def test_run_hook_reads_the_earlier_budget_name_as_digits_only(self):
         self.ready()
