@@ -2477,7 +2477,7 @@ class BackgroundTests(RecordSandbox):
         os.makedirs(self.folder(), mode=0o700)
         os.chmod(os.path.join(self.data, "private"), 0o700)
         with open(os.path.join(self.folder(), "sync.lock"), "w") as handle:
-            json.dump({"pid": 999999, "started": time.time(), "budget": 300}, handle)
+            json.dump({"pid": DEAD_PID, "started": time.time(), "budget": 300}, handle)
         os.chmod(os.path.join(self.folder(), "sync.lock"), 0o600)
         self.assertEqual(BUILDING + "\n", self.hook("session-start").stdout)
         self.wait_background()
