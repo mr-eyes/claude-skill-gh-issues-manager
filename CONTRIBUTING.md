@@ -3,8 +3,12 @@
 ## Tests
 
 ```bash
-python3 -m unittest discover -s tests
+mkdir -p .tmp
+python3 -m unittest tests.test_scripts.{LintTests,HelperTests,LabelTests,CreateIssuesTests,PostVerifiedTests,ConvertBodyTests,SyncTests,RecoveryTests,CompileTests,TriageAndFormatTests,CatchUpTests,SnapshotTests,PackagingTests}
+python3 -m unittest tests.test_scripts.{ResumeBlockTests,IndexTests,HookTests,StorageTests,GuardTests,BackgroundTests,DiscoveryTests,SetupTests,EarlierNameTests}
 ```
+
+The two commands hold every test class between them, and each takes a few minutes; `python3 -m unittest discover -s tests` runs the same tests in one command of about four and a half minutes. A new test class goes into one of the two lists. `mkdir -p .tmp` makes the folder that a test needs when its class runs first in a fresh clone.
 
 The tests run the scripts against `tests/fake_gh.py`, a local stand-in for `gh` selected with the `RECORTEX_GH` environment variable. They work in temporary folders under `.tmp/` and remove them afterwards; set `RECORTEX_TEST_KEEP=1` to keep them for inspection. No test may contact GitHub.
 
@@ -26,7 +30,7 @@ Check the packaging with `claude plugin validate .`.
 - A pattern that checks an untrusted name, number or time uses explicit ASCII classes (`[0-9]`, `[A-Za-z0-9]`, not `\d`, `\w` or `\s`) and `fullmatch`, or `re.ASCII` where a class must stay as it is. The scripts write `[0-9]` and never `\d`, in every pattern; a test checks it. A repository name goes through `recortex.valid_repo`, GitHub's form of `owner/name`.
 - The agents in `agents/` never post to GitHub and never start another agent. The drafter's tools are file tools only. The reviewer and the auditor are read-only by instruction: they have Bash for read commands, so do not describe them as unable to write. New hook text is fixed wording plus validated numbers or names, or sits inside the data frame.
 - `SKILL.md` stays short. Detail goes into `references/`, and every reference file is linked from `SKILL.md`.
-- Names live in `names.py`: the plugin's name, the configuration file, the folder, the variable prefix and the workflow, current and from before the rename (`gh-issues-manager`, `.gh-issues-manager.json`, `GHIM_`, `ghim-triage.yml`). Plugin variables are read only through `names.env`, and no other module spells an earlier name; a test scans the tree for them. An earlier name that is still read has a test for the earlier name alone, the current one alone, and both. `renames` in `.claude-plugin/marketplace.json` is append-only history. The `ghim:` markers are the record format and are not renamed. The shared module is `recortex.py`, and the tests also honor `GHIM_TEST_KEEP`.
+- Names live in `names.py`: the plugin's name, the configuration file, the folder, the variable prefix and the workflow, current and from before the rename (`gh-issues-manager`, `.gh-issues-manager.json`, `GHIM_`, `ghim-triage.yml`). Plugin variables are read only through `names.env`, and no other module spells an earlier name, except `run_hook.sh`, which reads the earlier budget name itself; a test scans the tree for them. An earlier name that is still read has a test for the earlier name alone, the current one alone, and both. `renames` in `.claude-plugin/marketplace.json` is append-only history. The `ghim:` markers are the record format and are not renamed. The shared module is `recortex.py`, and the tests also honor `GHIM_TEST_KEEP`.
 - Examples use invented projects only.
 
 ## Releases
