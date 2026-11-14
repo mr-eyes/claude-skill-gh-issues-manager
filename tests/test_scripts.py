@@ -4878,8 +4878,8 @@ class PackagingTests(unittest.TestCase):
 
     def test_no_file_holds_an_earlier_name_outside_the_places_that_keep_it(self):
         """Like the digit scan: the names from before the rename appear only where they are kept on purpose."""
-        earlier = re.compile(r"gh-issues-manager|ghim|GHIM_", re.I)
-        markers = re.compile(r"ghim:(?:event|resume:start|resume:end)?")  # the record format, kept (D3)
+        earlier = re.compile(r"gh[-_ ]?issues[-_ ]?manager|ghim", re.I)  # GHIM_ and ghim.py hold "ghim"
+        markers = re.compile(r"ghim:(?:event|resume:start|resume:end)")  # the record format, kept (D3)
 
         def upgrade_section(lines):
             inside, keep = False, set()
@@ -4901,6 +4901,7 @@ class PackagingTests(unittest.TestCase):
             "skills/recortex/SKILL.md": where(lambda line: line.startswith("description: ")),
             "README.md": upgrade_section,
             "CONTRIBUTING.md": where(lambda line: "names.py" in line),
+            "skills/recortex/references/templates.md": where(lambda line: "The marker prefix `ghim:` predates" in line),
         }
         found, used = [], set()
         for folder, dirs, files in os.walk(ROOT):
